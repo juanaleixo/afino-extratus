@@ -1,11 +1,11 @@
-import { fromZonedTime, toZonedTime } from 'date-fns-tz'
-import Decimal from 'decimal.js'
 import type {
   ExtractionResult,
   NormalizedTransaction,
   SerializedExtractionResult,
   SerializedTransaction,
 } from '@/types/transaction'
+import { fromZonedTime, toZonedTime } from 'date-fns-tz'
+import Decimal from 'decimal.js'
 
 export const BR_TIMEZONE = 'America/Sao_Paulo'
 
@@ -29,16 +29,15 @@ export function formatBrDate(date: Date): string {
 export function formatOfxDateTime(date: Date): string {
   const z = toZonedTime(date, BR_TIMEZONE)
   const pad = (n: number) => n.toString().padStart(2, '0')
-  return (
-    `${z.getFullYear()}${pad(z.getMonth() + 1)}${pad(z.getDate())}` +
-    `${pad(z.getHours())}${pad(z.getMinutes())}${pad(z.getSeconds())}` +
-    `[-3:BRT]`
-  )
+  return `${z.getFullYear()}${pad(z.getMonth() + 1)}${pad(z.getDate())}${pad(z.getHours())}${pad(z.getMinutes())}${pad(z.getSeconds())}[-3:BRT]`
 }
 
 /** Parse a Brazilian decimal string ("1.234,56" or "R$ 1.234,56") into Decimal. */
 export function parseBrAmount(input: string): Decimal {
-  const cleaned = input.replace(/[^\d,.\-]/g, '').replace(/\./g, '').replace(',', '.')
+  const cleaned = input
+    .replace(/[^\d,.\-]/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.')
   if (!cleaned || cleaned === '-') throw new Error(`Invalid BR amount: ${input}`)
   return new Decimal(cleaned)
 }

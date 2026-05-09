@@ -29,8 +29,6 @@ export const mercadopago: Recipe = {
   }),
 
   extract: async () => {
-    throw new Error(
-      'Recipe do Mercado Pago em descoberta. Veja src/recipes/mercadopago.com.br.ts para o roteiro.',
-    )
+    throw new Error('Recipe do Mercado Pago em descoberta. Veja src/recipes/mercadopago.com.br.ts para o roteiro.')
   },
 }

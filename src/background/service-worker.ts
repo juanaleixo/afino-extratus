@@ -1,6 +1,6 @@
 import { buildCsv } from '@/engine/csv-generator'
-import { buildOfx } from '@/engine/ofx-generator'
 import { deserializeResult } from '@/engine/normalize'
+import { buildOfx } from '@/engine/ofx-generator'
 import type { SerializedExtractionResult } from '@/types/transaction'
 
 interface ExportRequest {

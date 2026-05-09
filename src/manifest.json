@@ -4,9 +4,7 @@
   "version": "0.0.1",
   "description": "Exporta extratos OFX/CSV de bancos e fintechs brasileiros direto do navegador",
   "permissions": ["activeTab", "downloads", "storage", "scripting"],
-  "host_permissions": [
-    "https://*.mercadopago.com.br/*"
-  ],
+  "host_permissions": ["https://*.mercadopago.com.br/*"],
   "background": {
     "service_worker": "src/background/service-worker.ts",
     "type": "module"

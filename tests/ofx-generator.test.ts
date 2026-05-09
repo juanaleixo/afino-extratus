@@ -1,7 +1,7 @@
-import Decimal from 'decimal.js'
-import { describe, expect, it } from 'vitest'
 import { buildOfx } from '@/engine/ofx-generator'
 import type { ExtractionResult } from '@/types/transaction'
+import Decimal from 'decimal.js'
+import { describe, expect, it } from 'vitest'
 
 function makeResult(overrides: Partial<ExtractionResult> = {}): ExtractionResult {
   return {

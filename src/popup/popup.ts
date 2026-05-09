@@ -1,3 +1,6 @@
+import { formatBrDate } from '@/engine/normalize'
+import type { SerializedExtractionResult } from '@/types/transaction'
+
 const statusEl = document.getElementById('status') as HTMLDivElement
 const ofxBtn = document.getElementById('export-ofx') as HTMLButtonElement
 const csvBtn = document.getElementById('export-csv') as HTMLButtonElement
@@ -39,20 +42,31 @@ async function exportFor(tabId: number, format: 'ofx' | 'csv'): Promise<void> {
     const extractResp = await chrome.tabs.sendMessage(tabId, { type: 'extract' })
     if (!extractResp?.ok) throw new Error(extractResp?.error ?? 'Falha ao extrair')
 
+    const result = extractResp.result as SerializedExtractionResult
+    setStatus(`${summarize(result)} — gerando ${format.toUpperCase()}…`, 'matched')
+
     const exportResp = await chrome.runtime.sendMessage({
       type: 'export',
       format,
-      result: extractResp.result,
+      result,
     })
     if (!exportResp?.ok) throw new Error(exportResp?.error ?? 'Falha ao exportar')
 
-    setStatus('Download iniciado', 'matched')
+    setStatus(`${summarize(result)} — download iniciado`, 'matched')
   } catch (err) {
     setStatus(`Erro: ${(err as Error).message}`, 'error')
   } finally {
     ofxBtn.disabled = false
     csvBtn.disabled = false
   }
+}
+
+function summarize(result: SerializedExtractionResult): string {
+  const n = result.transactions.length
+  const start = formatBrDate(new Date(result.periodStart))
+  const end = formatBrDate(new Date(result.periodEnd))
+  const range = start === end ? start : `${start} – ${end}`
+  return `${n} ${n === 1 ? 'transação' : 'transações'} (${range})`
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
