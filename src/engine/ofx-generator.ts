@@ -4,8 +4,17 @@ import { formatOfxDateTime } from './normalize'
 /**
  * Build an OFX 1.0.2 SGML document. Most Brazilian importers (Afino, GnuCash,
  * banks' reconciliation tools) expect this dialect rather than OFX 2.0 XML.
+ *
+ * Accepts one result or many. When given many, bank accounts share a single
+ * BANKMSGSRSV1 (one STMTTRNRS each) and credit cards share a CREDITCARDMSGSRSV1.
  */
-export function buildOfx(result: ExtractionResult, generatedAt: Date = new Date()): string {
+export function buildOfx(input: ExtractionResult | ExtractionResult[], generatedAt: Date = new Date()): string {
+  const results = Array.isArray(input) ? input : [input]
+  if (results.length === 0) throw new Error('buildOfx: no results provided')
+
+  const bankResults = results.filter((r) => r.account.type !== 'credit_card')
+  const ccResults = results.filter((r) => r.account.type === 'credit_card')
+
   const header = [
     'OFXHEADER:100',
     'DATA:OFXSGML',
@@ -20,20 +29,34 @@ export function buildOfx(result: ExtractionResult, generatedAt: Date = new Date(
     '',
   ].join('\r\n')
 
-  const body =
-    result.account.type === 'credit_card' ? renderCreditCard(result, generatedAt) : renderBank(result, generatedAt)
+  const body = [
+    '<OFX>',
+    renderSignon(generatedAt),
+    ...(bankResults.length ? renderBankBlock(bankResults) : []),
+    ...(ccResults.length ? renderCreditCardBlock(ccResults) : []),
+    '</OFX>',
+  ].join('\r\n')
 
   return header + body
 }
 
-function renderBank(result: ExtractionResult, generatedAt: Date): string {
+function renderBankBlock(results: ExtractionResult[]): string[] {
+  return ['<BANKMSGSRSV1>', ...results.flatMap((r, i) => renderBankStatement(r, i + 1)), '</BANKMSGSRSV1>']
+}
+
+function renderCreditCardBlock(results: ExtractionResult[]): string[] {
+  return [
+    '<CREDITCARDMSGSRSV1>',
+    ...results.flatMap((r, i) => renderCreditCardStatement(r, i + 1)),
+    '</CREDITCARDMSGSRSV1>',
+  ]
+}
+
+function renderBankStatement(result: ExtractionResult, trnuid: number): string[] {
   const { account, transactions, periodStart, periodEnd } = result
   return [
-    '<OFX>',
-    renderSignon(generatedAt),
-    '<BANKMSGSRSV1>',
     '<STMTTRNRS>',
-    '<TRNUID>1',
+    `<TRNUID>${trnuid}`,
     '<STATUS><CODE>0<SEVERITY>INFO</STATUS>',
     '<STMTRS>',
     `<CURDEF>${account.currency}`,
@@ -49,19 +72,14 @@ function renderBank(result: ExtractionResult, generatedAt: Date): string {
     '</BANKTRANLIST>',
     '</STMTRS>',
     '</STMTTRNRS>',
-    '</BANKMSGSRSV1>',
-    '</OFX>',
-  ].join('\r\n')
+  ]
 }
 
-function renderCreditCard(result: ExtractionResult, generatedAt: Date): string {
+function renderCreditCardStatement(result: ExtractionResult, trnuid: number): string[] {
   const { account, transactions, periodStart, periodEnd } = result
   return [
-    '<OFX>',
-    renderSignon(generatedAt),
-    '<CREDITCARDMSGSRSV1>',
     '<CCSTMTTRNRS>',
-    '<TRNUID>1',
+    `<TRNUID>${trnuid}`,
     '<STATUS><CODE>0<SEVERITY>INFO</STATUS>',
     '<CCSTMTRS>',
     `<CURDEF>${account.currency}`,
@@ -75,9 +93,7 @@ function renderCreditCard(result: ExtractionResult, generatedAt: Date): string {
     '</BANKTRANLIST>',
     '</CCSTMTRS>',
     '</CCSTMTTRNRS>',
-    '</CREDITCARDMSGSRSV1>',
-    '</OFX>',
-  ].join('\r\n')
+  ]
 }
 
 function renderSignon(generatedAt: Date): string {

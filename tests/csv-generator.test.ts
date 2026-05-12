@@ -3,9 +3,9 @@ import type { ExtractionResult, NormalizedTransaction } from '@/types/transactio
 import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
 
-function makeResult(transactions: NormalizedTransaction[]): ExtractionResult {
+function makeResult(transactions: NormalizedTransaction[], accountName = 'Test'): ExtractionResult {
   return {
-    account: { id: 'acc', name: 'Test', type: 'checking', currency: 'BRL' },
+    account: { id: 'acc', name: accountName, type: 'checking', currency: 'BRL' },
     transactions,
     periodStart: new Date('2026-05-01T00:00:00Z'),
     periodEnd: new Date('2026-05-31T23:59:59Z'),
@@ -27,9 +27,9 @@ function tx(overrides: Partial<NormalizedTransaction> = {}): NormalizedTransacti
 }
 
 describe('buildCsv', () => {
-  it('emits the BR header row first', () => {
+  it('emits the BR header row first (with Conta column)', () => {
     const csv = buildCsv(makeResult([]))
-    expect(csv.split('\r\n')[0]).toBe('Data,Descrição,Valor,Moeda,ID')
+    expect(csv.split('\r\n')[0]).toBe('Data,Descrição,Valor,Moeda,Conta,ID')
   })
 
   it('uses CRLF line endings between rows', () => {
@@ -63,5 +63,22 @@ describe('buildCsv', () => {
     const csv = buildCsv(makeResult([tx({ amount: new Decimal('0.10').plus('0.20') })]))
     expect(csv).toContain('"0,30"')
     expect(csv).not.toContain('0,30000')
+  })
+
+  it('includes account name in the Conta column', () => {
+    const csv = buildCsv(makeResult([tx()], 'Mercado Pago — Conta'))
+    expect(csv).toContain('Mercado Pago — Conta')
+  })
+
+  it('consolidates multiple ExtractionResults into one file', () => {
+    const r1 = makeResult([tx({ fitId: 'a' })], 'Conta')
+    const r2 = makeResult([tx({ fitId: 'b' })], 'Cofrinho')
+    const csv = buildCsv([r1, r2])
+    const lines = csv.split('\r\n')
+    expect(lines).toHaveLength(3) // header + 2 rows
+    expect(lines[1]).toContain('Conta')
+    expect(lines[1]).toContain(',a')
+    expect(lines[2]).toContain('Cofrinho')
+    expect(lines[2]).toContain(',b')
   })
 })

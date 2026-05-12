@@ -3,6 +3,6 @@ import { mercadopago } from './mercadopago.com.br'
 
 export const recipes: Recipe[] = [mercadopago]
 
-export function findRecipeForUrl(url: URL): Recipe | null {
-  return recipes.find((r) => r.match(url)) ?? null
+export function findRecipeBySite(site: string): Recipe | null {
+  return recipes.find((r) => r.site === site) ?? null
 }

@@ -1,6 +1,6 @@
 import { runRecipe } from '@/engine/recipe-runner'
 import type { Recipe } from '@/recipes/_schema'
-import type { NormalizedTransaction } from '@/types/transaction'
+import type { NormalizedTransaction, RecipeOutput } from '@/types/transaction'
 import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
 
@@ -20,65 +20,98 @@ function makeRecipe(overrides: Partial<Recipe> = {}): Recipe {
     site: 'test.com.br',
     version: 7,
     label: 'Test',
-    match: () => true,
-    detectAccount: () => ({ id: 'acc', name: 'Test', type: 'checking', currency: 'BRL' }),
-    extract: async () => [tx('2026-05-10T00:00:00Z', 'a'), tx('2026-05-01T00:00:00Z', 'b')],
+    extract: async () => [
+      {
+        account: { id: 'acc', name: 'Test', type: 'checking', currency: 'BRL' },
+        transactions: [tx('2026-05-10T00:00:00Z', 'a'), tx('2026-05-01T00:00:00Z', 'b')],
+      },
+    ],
     ...overrides,
   }
 }
 
+const noopFetch: typeof fetch = () => Promise.reject(new Error('fetch should not be called in this test'))
+
 describe('runRecipe', () => {
   it('derives periodStart/periodEnd from min/max transaction dates regardless of input order', async () => {
-    const result = await runRecipe({
-      recipe: makeRecipe(),
-      document: {} as Document,
-      window: {} as Window,
+    const results = await runRecipe({ recipe: makeRecipe(), fetch: noopFetch })
+    expect(results).toHaveLength(1)
+    expect(results[0]?.periodStart.toISOString()).toBe('2026-05-01T00:00:00.000Z')
+    expect(results[0]?.periodEnd.toISOString()).toBe('2026-05-10T00:00:00.000Z')
+  })
+
+  it('propagates recipe site and version into each result', async () => {
+    const results = await runRecipe({ recipe: makeRecipe(), fetch: noopFetch })
+    expect(results[0]?.recipeSite).toBe('test.com.br')
+    expect(results[0]?.recipeVersion).toBe(7)
+  })
+
+  it('returns one ExtractionResult per RecipeOutput', async () => {
+    const outputs: RecipeOutput[] = [
+      {
+        account: { id: 'a1', name: 'Checking', type: 'checking', currency: 'BRL' },
+        transactions: [tx('2026-05-01T00:00:00Z', 't1')],
+      },
+      {
+        account: { id: 's1', name: 'Pot', type: 'savings', currency: 'BRL' },
+        transactions: [tx('2026-04-01T00:00:00Z', 't2'), tx('2026-04-15T00:00:00Z', 't3')],
+      },
+    ]
+    const results = await runRecipe({
+      recipe: makeRecipe({ extract: async () => outputs }),
+      fetch: noopFetch,
     })
-    expect(result.periodStart.toISOString()).toBe('2026-05-01T00:00:00.000Z')
-    expect(result.periodEnd.toISOString()).toBe('2026-05-10T00:00:00.000Z')
+    expect(results).toHaveLength(2)
+    expect(results[0]?.account.id).toBe('a1')
+    expect(results[1]?.account.id).toBe('s1')
+    expect(results[1]?.periodStart.toISOString()).toBe('2026-04-01T00:00:00.000Z')
+    expect(results[1]?.periodEnd.toISOString()).toBe('2026-04-15T00:00:00.000Z')
   })
 
-  it('propagates recipe site and version into the result', async () => {
-    const result = await runRecipe({
-      recipe: makeRecipe(),
-      document: {} as Document,
-      window: {} as Window,
+  it('filters out empty outputs', async () => {
+    const outputs: RecipeOutput[] = [
+      {
+        account: { id: 'a1', name: 'Checking', type: 'checking', currency: 'BRL' },
+        transactions: [tx('2026-05-01T00:00:00Z', 't1')],
+      },
+      {
+        account: { id: 'empty', name: 'Empty pot', type: 'savings', currency: 'BRL' },
+        transactions: [],
+      },
+    ]
+    const results = await runRecipe({
+      recipe: makeRecipe({ extract: async () => outputs }),
+      fetch: noopFetch,
     })
-    expect(result.recipeSite).toBe('test.com.br')
-    expect(result.recipeVersion).toBe(7)
+    expect(results).toHaveLength(1)
+    expect(results[0]?.account.id).toBe('a1')
   })
 
-  it('throws when detectAccount returns null', async () => {
-    await expect(
-      runRecipe({
-        recipe: makeRecipe({ detectAccount: () => null }),
-        document: {} as Document,
-        window: {} as Window,
-      }),
-    ).rejects.toThrow(/identificar a conta/)
+  it('throws when ALL outputs are empty', async () => {
+    await expect(runRecipe({ recipe: makeRecipe({ extract: async () => [] }), fetch: noopFetch })).rejects.toThrow(
+      /Nenhuma transa/,
+    )
   })
 
-  it('throws when extract returns no transactions (avoid emitting empty OFX)', async () => {
-    await expect(
-      runRecipe({
-        recipe: makeRecipe({ extract: async () => [] }),
-        document: {} as Document,
-        window: {} as Window,
+  it('passes fetch and period through to the recipe', async () => {
+    let received: { fetch?: typeof fetch; period?: unknown } = {}
+    const customFetch: typeof fetch = () => Promise.reject(new Error('unused'))
+    await runRecipe({
+      recipe: makeRecipe({
+        extract: async (ctx) => {
+          received = ctx
+          return [
+            {
+              account: { id: 'a', name: 'A', type: 'checking', currency: 'BRL' },
+              transactions: [tx('2026-05-01T00:00:00Z', 'x')],
+            },
+          ]
+        },
       }),
-    ).rejects.toThrow(/Nenhuma transa/)
-  })
-
-  it('propagates errors thrown inside extract verbatim', async () => {
-    await expect(
-      runRecipe({
-        recipe: makeRecipe({
-          extract: async () => {
-            throw new Error('selector mudou')
-          },
-        }),
-        document: {} as Document,
-        window: {} as Window,
-      }),
-    ).rejects.toThrow('selector mudou')
+      fetch: customFetch,
+      period: { preset: 'last_week' },
+    })
+    expect(received.fetch).toBe(customFetch)
+    expect(received.period).toEqual({ preset: 'last_week' })
   })
 })

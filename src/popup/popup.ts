@@ -1,58 +1,61 @@
-import { formatBrDate } from '@/engine/normalize'
-import type { SerializedExtractionResult } from '@/types/transaction'
+import type { PeriodPreset } from '@/recipes/_schema'
+import helpUrl from './help.html?url'
 
-const statusEl = document.getElementById('status') as HTMLDivElement
+const recipeSelect = document.getElementById('recipe-select') as HTMLSelectElement
+const periodSelect = document.getElementById('period-select') as HTMLSelectElement
 const ofxBtn = document.getElementById('export-ofx') as HTMLButtonElement
 const csvBtn = document.getElementById('export-csv') as HTMLButtonElement
+const statusEl = document.getElementById('status') as HTMLDivElement
+const helpLink = document.getElementById('help-link') as HTMLAnchorElement
+
+helpLink.href = helpUrl
 
 init().catch((err: Error) => setStatus(`Erro: ${err.message}`, 'error'))
 
 async function init(): Promise<void> {
-  const tab = await getActiveTab()
-  if (!tab?.id || !tab.url) {
-    setStatus('Aba inválida')
+  const resp = await chrome.runtime.sendMessage({ type: 'list-recipes' })
+  if (!resp?.ok) {
+    setStatus('Falha ao listar bancos suportados', 'error')
     return
   }
 
-  let pingResp: { matched: boolean; label: string | null } | null = null
-  try {
-    pingResp = await chrome.tabs.sendMessage(tab.id, { type: 'ping' })
-  } catch {
-    // Content script not loaded on this page (no host_permissions match)
+  recipeSelect.innerHTML = ''
+  for (const r of resp.recipes as Array<{ site: string; label: string }>) {
+    const opt = document.createElement('option')
+    opt.value = r.site
+    opt.textContent = r.label
+    recipeSelect.appendChild(opt)
   }
 
-  if (!pingResp?.matched) {
-    setStatus('Site não suportado ainda. Veja src/recipes/ para contribuir.')
-    return
-  }
-
-  setStatus(`${pingResp.label} detectado`, 'matched')
-  ofxBtn.disabled = false
-  csvBtn.disabled = false
-  ofxBtn.addEventListener('click', () => exportFor(tab.id as number, 'ofx'))
-  csvBtn.addEventListener('click', () => exportFor(tab.id as number, 'csv'))
+  ofxBtn.addEventListener('click', () => exportNow('ofx'))
+  csvBtn.addEventListener('click', () => exportNow('csv'))
 }
 
-async function exportFor(tabId: number, format: 'ofx' | 'csv'): Promise<void> {
+async function exportNow(format: 'ofx' | 'csv'): Promise<void> {
   ofxBtn.disabled = true
   csvBtn.disabled = true
-  setStatus('Extraindo…')
+  setStatus('Extraindo… isso pode levar 5–15 segundos', null)
 
   try {
-    const extractResp = await chrome.tabs.sendMessage(tabId, { type: 'extract' })
-    if (!extractResp?.ok) throw new Error(extractResp?.error ?? 'Falha ao extrair')
-
-    const result = extractResp.result as SerializedExtractionResult
-    setStatus(`${summarize(result)} — gerando ${format.toUpperCase()}…`, 'matched')
-
-    const exportResp = await chrome.runtime.sendMessage({
+    const resp = await chrome.runtime.sendMessage({
       type: 'export',
+      site: recipeSelect.value,
       format,
-      result,
+      period: { preset: periodSelect.value as PeriodPreset },
     })
-    if (!exportResp?.ok) throw new Error(exportResp?.error ?? 'Falha ao exportar')
-
-    setStatus(`${summarize(result)} — download iniciado`, 'matched')
+    if (!resp?.ok) {
+      if (resp?.loginRequired) {
+        showLoginRequired(recipeSelect.value)
+      } else {
+        setStatus(`Erro: ${resp?.error ?? 'desconhecido'}`, 'error')
+      }
+      return
+    }
+    const { accounts, transactions } = resp.summary as { accounts: number; transactions: number }
+    setStatus(
+      `${transactions} transações em ${accounts} ${accounts === 1 ? 'conta' : 'contas'} — download iniciado`,
+      'ok',
+    )
   } catch (err) {
     setStatus(`Erro: ${(err as Error).message}`, 'error')
   } finally {
@@ -61,21 +64,21 @@ async function exportFor(tabId: number, format: 'ofx' | 'csv'): Promise<void> {
   }
 }
 
-function summarize(result: SerializedExtractionResult): string {
-  const n = result.transactions.length
-  const start = formatBrDate(new Date(result.periodStart))
-  const end = formatBrDate(new Date(result.periodEnd))
-  const range = start === end ? start : `${start} – ${end}`
-  return `${n} ${n === 1 ? 'transação' : 'transações'} (${range})`
+function showLoginRequired(site: string): void {
+  statusEl.textContent = 'Você não está logado. '
+  statusEl.classList.remove('ok')
+  statusEl.classList.add('error')
+  const link = document.createElement('span')
+  link.className = 'action'
+  link.textContent = `Abrir ${site} →`
+  link.addEventListener('click', () => {
+    chrome.tabs.create({ url: `https://${site}/` })
+  })
+  statusEl.appendChild(link)
 }
 
-async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-  return tabs[0]
-}
-
-function setStatus(text: string, kind: 'matched' | 'error' | null = null): void {
+function setStatus(text: string, kind: 'ok' | 'error' | null): void {
   statusEl.textContent = text
-  statusEl.classList.remove('matched', 'error')
+  statusEl.classList.remove('ok', 'error')
   if (kind) statusEl.classList.add(kind)
 }

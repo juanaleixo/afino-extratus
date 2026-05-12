@@ -110,7 +110,7 @@ describe('buildOfx', () => {
           {
             fitId: 'tx',
             postedAt: new Date('2026-05-01T00:00:00Z'),
-            amount: new Decimal('0.10').plus('0.20'), // 0.30, not 0.30000000000000004
+            amount: new Decimal('0.10').plus('0.20'), // 0.30
             currency: 'BRL',
             description: 'precision',
             type: 'credit',
@@ -120,5 +120,34 @@ describe('buildOfx', () => {
     )
     expect(ofx).toContain('<TRNAMT>0.30')
     expect(ofx).not.toContain('0.30000')
+  })
+
+  it('multi-account: groups all bank accounts under a single BANKMSGSRSV1 with sequential TRNUIDs', () => {
+    const checking = makeResult({ account: { id: 'mp-checking', name: 'Conta', type: 'checking', currency: 'BRL' } })
+    const savings = makeResult({
+      account: { id: 'mp-pot-1', name: 'Cofrinho', type: 'savings', currency: 'BRL' },
+    })
+    const ofx = buildOfx([checking, savings])
+    expect(ofx.match(/<BANKMSGSRSV1>/g)).toHaveLength(1)
+    expect(ofx.match(/<\/BANKMSGSRSV1>/g)).toHaveLength(1)
+    expect(ofx.match(/<STMTTRNRS>/g)).toHaveLength(2)
+    expect(ofx).toMatch(/<TRNUID>1[\r\n]/)
+    expect(ofx).toMatch(/<TRNUID>2[\r\n]/)
+    expect(ofx).toContain('<ACCTTYPE>CHECKING')
+    expect(ofx).toContain('<ACCTTYPE>SAVINGS')
+  })
+
+  it('multi-account: bank + credit card share signon but split into two message blocks', () => {
+    const checking = makeResult({ account: { id: 'a', name: 'Conta', type: 'checking', currency: 'BRL' } })
+    const card = makeResult({ account: { id: 'b', name: 'Cartão', type: 'credit_card', currency: 'BRL' } })
+    const ofx = buildOfx([checking, card])
+    expect(ofx.match(/<SIGNONMSGSRSV1>/g)).toHaveLength(1)
+    expect(ofx).toContain('<BANKMSGSRSV1>')
+    expect(ofx).toContain('<CREDITCARDMSGSRSV1>')
+    expect(ofx).toContain('<CCSTMTTRNRS>')
+  })
+
+  it('throws on empty input (would emit a useless OFX)', () => {
+    expect(() => buildOfx([])).toThrow(/no results/)
   })
 })

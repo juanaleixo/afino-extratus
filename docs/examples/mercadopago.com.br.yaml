@@ -1,0 +1,194 @@
+# Recipe declarativa - Mercado Pago
+# Formato proposto v0.1. Cobre 3 contas observáveis numa conta pessoal MP:
+#  - Conta corrente (extrato bancário, via bitacora middle-end)
+#  - Cofrinhos (cada um vira uma conta separada de tipo savings, com rendimento isolado)
+#  - Lançamentos futuros (Pix agendados, fonte de "upcoming" para previsão)
+# Cartão de crédito MP, Mercado Pago Cripto e Investimentos não estão aqui
+# porque a conta usada na descoberta não tinha esses produtos habilitados.
+
+meta:
+  site: mercadopago.com.br
+  version: 1
+  label: Mercado Pago
+  match:
+    hostname: /(^|\.)mercadopago\.com\.br$/
+  schemaVersion: 0.1
+
+# A recipe é uma coleção de "sources". Cada source produz transações
+# para UMA conta. Múltiplas sources viram múltiplos accounts no OFX final.
+sources:
+
+  # --- 1. Conta corrente (bitacora) ----------------------------------
+  - id: checking
+    account:
+      name: Mercado Pago — Conta
+      type: checking
+      currency: BRL
+
+    fetch:
+      method: GET
+      url: https://www.mercadopago.com.br/banking/balance/movements
+      # caminho declarativo: a página vem com SSR (Nordic). O loader
+      # baixa o HTML, extrai o script #__NORDIC_RENDERING_CTX__ e
+      # interpreta como JS via parser balanceado de chaves.
+      response:
+        kind: ssr-nordic
+        rootPath: appProps.pageProps.initialState.list.result
+      pagination:
+        strategy: page-number
+        param: page
+        start: 1
+        # O total de páginas vem no próprio response.
+        until: response.pages
+        delayMs: 300
+
+    # Onde encontrar o array de transações dentro do response normalizado.
+    items: binnacles[*].movements[*]
+
+    # Mapeamento campo a campo. Os caminhos referenciam cada item.
+    # Funções built-in: concat, when, money(fraction, cents, sep).
+    map:
+      fitId: $.id
+      postedAt: $.ledger_datetime            # já é ISO UTC, vira Date direto
+      amount:
+        kind: money-fraction-cents
+        fraction: $.amount.fraction          # negativo já vem com "-"
+        cents: $.amount.cents
+        thousandsSeparator: "."
+      currency: $.amount.currency_id
+      type:
+        when:
+          - { equals: [$.metadata.type, "out"],    set: debit }
+          - { equals: [$.metadata.type, "in"],     set: credit }
+          - { equals: [$.metadata.type, "income"], set: credit }
+        default: credit
+      description:
+        concat:
+          - $.title
+          - { when: [{ nonEmpty: $.description }, " — "], default: "" }
+          - $.description
+      memo:
+        # detalhes que importam pra reconciliação manual, viram <MEMO>
+        concat:
+          - "detail_id="
+          - $.detail_id
+          - " ref="
+          - $.metadata.reference_id
+
+    # Regras opcionais aplicadas DEPOIS do map, para casos especiais.
+    rules:
+      # Pix recebido/enviado: prefixa a descrição
+      - when: { equals: [$.metadata.detail, "pix"] }
+        set:
+          description: { concat: ["Pix · ", out.description] }
+      # Transferência para cofrinho (sai da conta corrente)
+      - when: { equals: [$.metadata.kind, "fund_reallocation"] }
+        set:
+          description: { concat: ["Cofrinho · ", out.description] }
+
+  # --- 2. Cada cofrinho (porquinho, etc.) ----------------------------
+  # O loader primeiro descobre os UUIDs visitando /savings/hub
+  # (mesma estratégia ssr-nordic) e itera produzindo uma source por cofrinho.
+  - id: savings-{potId}
+    discoverFrom:
+      url: https://www.mercadopago.com.br/savings/hub
+      response: { kind: ssr-nordic, rootPath: appProps.pageProps }
+      iterate: pots[*]
+      bind:
+        potId: $.id
+        potName: $.name
+
+    account:
+      name: "Mercado Pago — Cofrinho {potName}"
+      type: savings
+      currency: BRL
+
+    fetch:
+      method: GET
+      url: "https://www.mercadopago.com.br/savings/movements/{potId}"
+      response:
+        kind: ssr-nordic
+        rootPath: appProps.pageProps.initialState.list.result
+      pagination:
+        strategy: page-number
+        param: page
+        start: 1
+        until: response.pages
+        delayMs: 300
+
+    items: binnacles[*].movements[*]
+    map:
+      fitId: $.id
+      postedAt: $.ledger_datetime
+      amount:
+        kind: money-fraction-cents
+        fraction: $.amount.fraction
+        cents: $.amount.cents
+        thousandsSeparator: "."
+      currency: $.amount.currency_id
+      type:
+        when:
+          - { equals: [$.metadata.type, "out"],    set: debit }
+          - { equals: [$.metadata.type, "income"], set: credit }
+          - { equals: [$.metadata.type, "in"],     set: credit }
+      description: $.title
+      memo:
+        concat: ["detail_id=", $.detail_id, " ref=", $.metadata.reference_id]
+
+    rules:
+      # Rendimento automático: marcador específico do MP.
+      # Esse é o caso que motivou o Extratus existir.
+      - when:
+          equals: [$.metadata.recipe, "fund-asset_management_gain"]
+        set:
+          description: { concat: ["Rendimento · ", out.description] }
+
+  # --- 3. Lançamentos futuros (Pix agendado) -------------------------
+  # Opcional, off por padrão: agendados não são "transações" reais ainda,
+  # mas alguns usuários querem ver pra projeção de saldo.
+  - id: upcoming
+    enabledByDefault: false
+    account:
+      name: "Mercado Pago — Lançamentos futuros"
+      type: pending
+      currency: BRL
+    fetch:
+      method: GET
+      url: https://www.mercadopago.com.br/banking/balance/movements
+      response:
+        kind: ssr-nordic
+        rootPath: appProps.pageProps.initialState.upcomingMovementsList.result
+    items: movements[*]
+    map:
+      fitId: $.id
+      postedAt: $.scheduled_date            # string tipo "15 de maio", precisa parser BR
+      amount:
+        kind: money-fraction-cents
+        fraction: $.amount.fraction
+        cents: $.amount.cents
+      currency: $.amount.currency_id
+      type:
+        when:
+          - { startsWith: [$.amount.fraction, "-"], set: debit }
+        default: credit
+      description:
+        concat: [$.title, " — ", $.description]
+
+# ===========================================================
+# NOTAS DE DESCOBERTA (não fazem parte do runtime, ficam aqui
+# pra documentar como foi mapeado e porquê)
+# ===========================================================
+#
+# Endpoint JSON alternativo descoberto:
+#   /activities/api/list/activities?page=N&client=activities
+#     &period=today|yesterday|last_week|last_two_weeks|month|other
+#     &date_from=YYYY-MM-DD&date_to=YYYY-MM-DD   (apenas com period=other)
+#
+# Não foi usado porque /banking/balance/movements (bitacora) tem schema
+# mais rico: partial_balance (saldo após cada transação), ledger_datetime
+# (data contábil separada de data de movimento), metadata.type canônico,
+# e categorias custom do usuário (26 disponíveis).
+#
+# Export oficial: /balance/reports/account_status oferece PDF/XLSX/CSV
+# mas limita a 31 dias por relatório e não tem OFX. Útil como cross-check
+# de valores, não como fonte primária.

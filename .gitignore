@@ -8,3 +8,5 @@ coverage/
 .vite/
 .idea/
 .vscode/
+tmp/
+.claude/

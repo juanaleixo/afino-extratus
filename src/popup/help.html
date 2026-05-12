@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Extratus — Contribuir uma recipe</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      body {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 32px 24px 80px;
+        line-height: 1.55;
+        color: CanvasText;
+        background: Canvas;
+      }
+      h1 {
+        font-size: 24px;
+        margin-bottom: 0;
+      }
+      h2 {
+        font-size: 17px;
+        margin-top: 28px;
+      }
+      .lead {
+        opacity: 0.75;
+        margin-top: 4px;
+      }
+      ol,
+      ul {
+        padding-left: 22px;
+      }
+      li {
+        margin-bottom: 6px;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+      pre {
+        background: rgba(127, 127, 127, 0.1);
+        border: 1px solid rgba(127, 127, 127, 0.25);
+        border-radius: 6px;
+        padding: 14px 16px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+      }
+      .prompt-wrap {
+        position: relative;
+      }
+      .copy-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        font-size: 12px;
+        padding: 4px 10px;
+        border: 1px solid currentColor;
+        background: Canvas;
+        color: inherit;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .copy-btn:hover {
+        opacity: 0.85;
+      }
+      .copy-btn.copied {
+        background: rgba(34, 197, 94, 0.15);
+      }
+      .note {
+        padding: 12px 14px;
+        border-radius: 6px;
+        background: rgba(127, 127, 127, 0.1);
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Contribuir uma recipe</h1>
+    <p class="lead">
+      Cada banco/fintech suportada pelo Extratus é um arquivo em <code>src/recipes/&lt;dominio&gt;.ts</code>. Se o seu
+      banco não está coberto, você pode usar um agente com browser tools (Claude in Chrome, Computer Use, ou outro) para
+      descobrir os endpoints e o schema — depois abre um PR.
+    </p>
+
+    <h2>1. Pré-requisitos</h2>
+    <ul>
+      <li>Estar logado na sua conta do banco em uma aba do Chrome.</li>
+      <li>Um agente com acesso ao navegador. Recomendado: <a href="https://www.anthropic.com/news/claude-in-chrome" target="_blank">Claude in Chrome</a> ou Claude Code com o MCP <code>claude-in-chrome</code>.</li>
+      <li>O repositório do Extratus clonado localmente (você vai abrir o PR a partir dele).</li>
+    </ul>
+
+    <h2>2. Cole este prompt no seu agente</h2>
+    <p>O agente vai navegar pela sua sessão logada e produzir um relatório que vira a recipe.</p>
+
+    <div class="prompt-wrap">
+      <button id="copy" class="copy-btn">Copiar</button>
+      <pre id="prompt">Você vai descobrir como o site do meu banco renderiza o extrato, e produzir uma recipe TypeScript para o projeto Extratus (https://github.com/&lt;owner&gt;/extratus). Eu já estou logado na conta. NÃO clique em botões que mudem estado (transferir, pagar, confirmar) — você é READ-ONLY.
+
+OBJETIVO
+Mapear como obter, de forma programática, a lista completa de transações do extrato — incluindo paginação e filtros de data — e devolver um arquivo TypeScript no formato Recipe do Extratus.
+
+PASSO A PASSO
+
+1. Abra a página principal de extrato do banco e me diga a URL. Tire screenshot.
+
+2. Antes de qualquer clique, inspecione o HTML inicial procurando dados embarcados (SSR):
+   - `&lt;script id="__NEXT_DATA__"&gt;` (Next.js)
+   - `&lt;script id="__NORDIC_RENDERING_CTX__"&gt;` (Mercado Libre)
+   - `window.__INITIAL_STATE__`, `window.__PRELOADED_STATE__`, `window.__APP_DATA__`
+   - Qualquer `&lt;script&gt;` cujo textContent contenha uma transação visível (procure por um valor R$ ou nome que aparece na tela).
+   Reporte: qual padrão SSR (se houver) e o JSONPath até o array de transações.
+
+3. Capture as requisições de rede (XHR/fetch) que populam a lista. Aplique um filtro de data (ex: "últimos 30 dias") e role a página. Reporte:
+   - URL exata de cada endpoint que retorna transações (preserve query params).
+   - Method, headers críticos (CSRF, X-Requested-With), cookies necessários.
+   - Se requer body POST: mostre o payload.
+
+4. Pegue UMA transação de exemplo e me mostre o JSON cru completo do item, com TODOS os campos. Identifique:
+   - `id` ESTÁVEL (para FITID, dedup em reimportação) — geralmente prefixado ou um UUID; NUNCA use um índice de array.
+   - data: idealmente ISO 8601 UTC; se for "DD/MM/YYYY" diga.
+   - valor: formato exato (centavos separados? sinal incluso? separador de milhares?).
+   - sinal de crédito/débito: existe campo canônico (ex: `type:"in"|"out"`)? Ou é inferido pelo sinal do valor?
+   - moeda: campo explícito ou implícito BRL?
+   - descrição: combina título + descrição? Tem categoria do usuário?
+
+5. Paginação. Iterate até a última página. Como funciona?
+   - `?page=N` 1-indexed ou 0-indexed?
+   - cursor (`?since=...`, `?after=...`)?
+   - scroll infinito (verifique XHR a cada scroll)?
+   Reporte o número total de transações reportado pelo backend e confirme que iterando você vê o mesmo total.
+
+6. Lançamentos especiais. Verifique se aparecem com tag distinta:
+   - Rendimento automático (cofrinho, savings)
+   - Pix (entrada/saída)
+   - Cartão (compra parcelada)
+   - Cashback / estorno
+   Marque a regra (ex: "metadata.kind=investment ⇒ Rendimento").
+
+7. Multi-conta. O site tem mais que uma conta exportável (corrente + cofrinhos + cartão)? Liste cada uma com a URL e o endpoint correspondente.
+
+ENTREGÁVEIS
+
+A. Um relatório curto em markdown com cada um dos 7 itens acima preenchido.
+
+B. Um arquivo TypeScript pronto para `src/recipes/&lt;dominio&gt;.ts` seguindo este padrão:
+
+```ts
+import type { Recipe } from './_schema'
+import type { RecipeOutput } from '@/types/transaction'
+import { fetchNordicCtx } from '@/engine/nordic-ssr'  // só se for site SSR Nordic
+import { sleep } from '@/engine/recipe-helpers'
+import Decimal from 'decimal.js'
+
+export const bancoX: Recipe = {
+  site: 'bancox.com.br',
+  version: 1,
+  label: 'Banco X',
+  match: (url) =&gt; /(^|\.)bancox\.com\.br$/.test(url.hostname),
+  extract: async ({ window }) =&gt; {
+    // 1. fetch páginas (loop sobre `page` até o total reportado)
+    // 2. dedup por id se houver overlap
+    // 3. map cada item para NormalizedTransaction: { fitId, postedAt: Date, amount: Decimal, currency, description, type }
+    // 4. retornar 1+ RecipeOutput (um por conta)
+    return []
+  },
+}
+```
+
+REGRAS NÃO NEGOCIÁVEIS
+- `amount` é Decimal (decimal.js). NUNCA parseFloat.
+- `postedAt` é `Date` em UTC. Se a fonte for "DD/MM/YYYY", parseia explicitamente em horário de Brasília e converte.
+- `fitId` é estável: duas exportações do mesmo período devem produzir os MESMOS fitIds.
+- `extract` é IDEMPOTENTE: rodar 2x não duplica.
+- Entre requests, dê `await sleep(250)` para não disparar antibot.
+
+Comece pelo passo 1 e vá em sequência. Mostre seu trabalho a cada passo.</pre>
+    </div>
+
+    <h2>3. Depois que o agente terminar</h2>
+    <ol>
+      <li>Salve o arquivo TS em <code>src/recipes/&lt;dominio&gt;.ts</code>.</li>
+      <li>Registre em <code>src/recipes/_registry.ts</code>.</li>
+      <li>Adicione o domínio em <code>host_permissions</code> e em um bloco <code>content_scripts.matches</code> no <code>src/manifest.json</code>.</li>
+      <li>Rode <code>npm test</code> e <code>npm run build</code>.</li>
+      <li>Teste exportando um OFX e importando no Afino (ou no software que você usa).</li>
+      <li>Abra um PR com o relatório markdown na descrição. A comunidade vai ter contexto pra revisar.</li>
+    </ol>
+
+    <h2>Por que a comunidade?</h2>
+    <p class="note">
+      Open Finance não cobre tudo (carteiras de cripto, contas legacy, fintechs menores, cofrinhos com rendimento). A
+      ideia do Extratus é cada um contribuir o seu — uma vez que a recipe está no repo, todo mundo se beneficia. Sem
+      senha viajando pra lugar nenhum: tudo roda no seu navegador, lendo o que você mesmo já está vendo.
+    </p>
+
+    <script>
+      document.getElementById('copy').addEventListener('click', async (e) => {
+        const btn = e.currentTarget
+        const text = document.getElementById('prompt').textContent
+        try {
+          await navigator.clipboard.writeText(text)
+          btn.textContent = 'Copiado!'
+          btn.classList.add('copied')
+          setTimeout(() => {
+            btn.textContent = 'Copiar'
+            btn.classList.remove('copied')
+          }, 1500)
+        } catch {
+          btn.textContent = 'Falhou — selecione manual'
+        }
+      })
+    </script>
+  </body>
+</html>

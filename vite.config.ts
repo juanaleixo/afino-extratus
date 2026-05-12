@@ -10,4 +10,11 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
+  server: {
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+    // pnpm or symlinked deps may live outside the project tree; relax the guard.
+    fs: { strict: false },
+  },
 })

@@ -20,9 +20,13 @@ export interface AccountInfo {
   currency: string
 }
 
-export interface ExtractionResult {
+/** What a Recipe produces for one account. The runner fills in period and recipe metadata. */
+export interface RecipeOutput {
   account: AccountInfo
   transactions: NormalizedTransaction[]
+}
+
+export interface ExtractionResult extends RecipeOutput {
   periodStart: Date
   periodEnd: Date
   recipeSite: string
