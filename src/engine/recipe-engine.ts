@@ -28,8 +28,15 @@ export type ProgressEvent =
       accountIndex: number
       totalAccounts: number
       accountName: string
+      /** Page index within the current paginated loop. Resets per window / iterate item. */
       page: number
+      /** Total pages for the current loop, if the API reports it. `null` for unknown — common
+       * with stopWhen-based pagination (Inter) and windowed history. */
       totalPages: number | null
+      /** Cumulative count of fetched pages for THIS account across all extracts, windows and iterations. */
+      pagesFetched: number
+      /** Cumulative count of unique transactions collected for this account so far. */
+      txCollected: number
     }
   | { phase: 'account-done'; accountIndex: number; totalAccounts: number; accountName: string; transactions: number }
   | { phase: 'done' }
@@ -170,14 +177,18 @@ export async function runRecipe(opts: RunRecipeOptions): Promise<ExtractionResul
       const p = planned[i] as PlannedAccount
       try {
         // Multiple extracts merged into a single deduped Map (same fitId from different sources = 1 tx).
+        // Owned by the worker so dedup is unified across extracts/windows AND the page handler can
+        // report `txCollected = merged.size` honestly.
         const merged = new Map<string, NormalizedTransaction>()
         const activeExtracts = p.extracts.filter((ex) => {
           if (!ex.runOnlyForPresets) return true
           const preset = period?.preset ?? 'all'
           return ex.runOnlyForPresets.includes(preset)
         })
+        let pagesFetched = 0
         for (const ex of activeExtracts) {
-          const txs = await runExtract(ex, safeFetch, period, p.vars, resolvers, (page, totalPages) => {
+          await runExtract(ex, safeFetch, period, p.vars, resolvers, merged, (page, totalPages) => {
+            pagesFetched += 1
             emit({
               phase: 'page',
               accountIndex: i,
@@ -185,9 +196,10 @@ export async function runRecipe(opts: RunRecipeOptions): Promise<ExtractionResul
               accountName: p.name,
               page,
               totalPages,
+              pagesFetched,
+              txCollected: merged.size,
             })
           })
-          for (const tx of txs) merged.set(tx.fitId, tx)
         }
         const finalTxs = [...merged.values()]
         emit({
@@ -298,10 +310,10 @@ async function runExtract(
   period: PeriodFilter | undefined,
   vars: Record<string, string>,
   resolvers: Resolvers,
+  seen: Map<string, NormalizedTransaction>,
   onPage?: (page: number, totalPages: number | null) => void,
-): Promise<NormalizedTransaction[]> {
+): Promise<void> {
   const periodVars = resolvePeriodVars(spec, period)
-  const seen = new Map<string, NormalizedTransaction>()
 
   if (spec.iterate) {
     const it = spec.iterate
@@ -309,6 +321,9 @@ async function runExtract(
     const delay = it.delayMs ?? 250
     const max = it.max ?? 500
     const root = await fetchSource(it.source, fetchFn, { ...vars, ...periodVars }, resolvers)
+    // Iterate list fetch is a real network round-trip — count it as a page so the user sees movement
+    // even before the per-item extracts start.
+    onPage?.(1, null)
     const allItems = collectList(root, it.list)
     const items = filter ? allItems.filter((item) => matchesCondition(item, filter)) : allItems
     const limit = Math.min(items.length, max)
@@ -322,7 +337,7 @@ async function runExtract(
       await runSingleWindow(spec, fetchFn, iterVars, resolvers, seen, onPage)
       if (i < limit - 1) await sleep(delay)
     }
-    return [...seen.values()]
+    return
   }
 
   if (spec.windowedHistory) {
@@ -347,7 +362,7 @@ async function runExtract(
         [endVar]: formatPeriodVar(end.toISOString(), fmt),
       }
       await runSingleWindow(spec, fetchFn, windowVars, resolvers, seen, onPage)
-      return [...seen.values()]
+      return
     }
 
     const horizonMs = wh.maxYears * 365 * 86_400_000
@@ -367,11 +382,10 @@ async function runExtract(
       if (seen.size === sizeBefore) break
       if (w < windows - 1) await sleep(windowDelay)
     }
-    return [...seen.values()]
+    return
   }
 
   await runSingleWindow(spec, fetchFn, { ...vars, ...periodVars }, resolvers, seen, onPage)
-  return [...seen.values()]
 }
 
 async function runSingleWindow(
@@ -385,12 +399,15 @@ async function runSingleWindow(
   const pagination = spec.pagination ?? { type: 'none' }
   const delay = spec.delayMs ?? 250
 
+  // onPage is always fired AFTER the network round-trip + item processing, so the caller's
+  // `txCollected = seen.size` reflects the page that just landed (not the one about to start).
+
   if (pagination.type === 'none') {
-    onPage?.(1, 1)
     const root = await fetchSource(spec.source, fetchFn, vars, resolvers)
     for (const tx of collectList(root, spec.list, spec.inheritFromParent).map((it) => mapItem(it, spec.fields, vars))) {
       if (tx) seen.set(tx.fitId, tx)
     }
+    onPage?.(1, 1)
     return
   }
 
@@ -401,25 +418,28 @@ async function runSingleWindow(
     const lastPage = startPage + max - 1
 
     for (let p = startPage; p <= lastPage; p++) {
-      const knownTotal = total !== null ? total - startPage + 1 : null
-      onPage?.(p - startPage + 1, knownTotal)
       const root = await fetchSource(spec.source, fetchFn, { ...vars, page: String(p) }, resolvers)
       if (pagination.totalPath && total === null) {
         const t = readPath(root, pagination.totalPath)
-        if (typeof t === 'number' && Number.isFinite(t)) {
-          total = t
-          onPage?.(1, total - startPage + 1)
-        }
+        if (typeof t === 'number' && Number.isFinite(t)) total = t
       }
-      if (pagination.stopWhen && matchesCondition(root, pagination.stopWhen)) break
+      if (pagination.stopWhen && matchesCondition(root, pagination.stopWhen)) {
+        // Still count this as a page — we did do a network round-trip.
+        onPage?.(p - startPage + 1, total !== null ? total - startPage + 1 : null)
+        break
+      }
       const items = collectList(root, spec.list, spec.inheritFromParent)
-      if (items.length === 0) break
+      if (items.length === 0) {
+        onPage?.(p - startPage + 1, total !== null ? total - startPage + 1 : null)
+        break
+      }
       // Stop if every item we just got is a duplicate of what we already have — protects against
       // backends that keep returning the same window past the actual end (Inter does this).
       const sizeBefore = seen.size
       for (const tx of items.map((it) => mapItem(it, spec.fields, vars))) {
         if (tx) seen.set(tx.fitId, tx)
       }
+      onPage?.(p - startPage + 1, total !== null ? total - startPage + 1 : null)
       if (seen.size === sizeBefore) break
       if (total !== null && p >= total) break
       await sleep(delay)
@@ -432,7 +452,6 @@ async function runSingleWindow(
     const max = pagination.max ?? 100
     const pageSize = pagination.pageSize
     for (let p = startPage; p < startPage + max; p++) {
-      onPage?.(p - startPage + 1, null)
       const root = await fetchSource(
         spec.source,
         fetchFn,
@@ -443,6 +462,7 @@ async function runSingleWindow(
       for (const tx of items.map((it) => mapItem(it, spec.fields, vars))) {
         if (tx) seen.set(tx.fitId, tx)
       }
+      onPage?.(p - startPage + 1, null)
       if (items.length < pageSize) break
       await sleep(delay)
     }
@@ -453,11 +473,11 @@ async function runSingleWindow(
   const max = pagination.max ?? 100
   let cursor = ''
   for (let i = 0; i < max; i++) {
-    onPage?.(i + 1, null)
     const root = await fetchSource(spec.source, fetchFn, { ...vars, cursor }, resolvers)
     for (const tx of collectList(root, spec.list, spec.inheritFromParent).map((it) => mapItem(it, spec.fields, vars))) {
       if (tx) seen.set(tx.fitId, tx)
     }
+    onPage?.(i + 1, null)
     const next = readPath(root, pagination.nextPath)
     if (typeof next !== 'string' || next.length === 0) break
     cursor = next

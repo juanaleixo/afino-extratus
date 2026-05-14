@@ -62,6 +62,8 @@ interface PerAccountProgress {
   name: string
   page: number
   totalPages: number | null
+  pagesFetched: number
+  txCollected: number
   done: boolean
 }
 
@@ -95,6 +97,8 @@ function handleProgress(event: ProgressEvent): void {
         name: event.accountName,
         page: event.page,
         totalPages: event.totalPages,
+        pagesFetched: event.pagesFetched,
+        txCollected: event.txCollected,
         done: prev?.done ?? false,
       })
       updateProgressUi()
@@ -102,16 +106,22 @@ function handleProgress(event: ProgressEvent): void {
     }
     case 'account-done': {
       if (!progressState) break
+      const prev = progressState.byIndex.get(event.accountIndex)
       progressState.byIndex.set(event.accountIndex, {
         name: event.accountName,
-        page: progressState.byIndex.get(event.accountIndex)?.page ?? 1,
-        totalPages: progressState.byIndex.get(event.accountIndex)?.totalPages ?? 1,
+        page: prev?.page ?? 1,
+        totalPages: prev?.totalPages ?? 1,
+        pagesFetched: prev?.pagesFetched ?? 0,
+        txCollected: event.transactions,
         done: true,
       })
       updateProgressUi()
       break
     }
     case 'done':
+      // Force determinate so the 100% width actually applies (during the run we may be in
+      // indeterminate mode for stopWhen-style pagination).
+      progressEl.classList.add('determinate')
       bar.style.width = '100%'
       break
   }
@@ -122,6 +132,7 @@ function updateProgressUi(): void {
   const bar = progressEl.firstElementChild as HTMLSpanElement
   let sum = 0
   let doneCount = 0
+  let anyUnknownInFlight = false
   const inFlight: PerAccountProgress[] = []
   for (let i = 0; i < progressState.totalAccounts; i++) {
     const s = progressState.byIndex.get(i)
@@ -130,20 +141,38 @@ function updateProgressUi(): void {
       sum += 1
       doneCount += 1
     } else {
-      sum += s.totalPages ? Math.min(1, s.page / s.totalPages) : 0
+      // Use page/totalPages fraction only when the API gives a real total; otherwise the in-flight
+      // account is "unknown progress" — we contribute 0 to the bar and pulse it indeterminate.
+      if (s.totalPages && s.totalPages > 0) {
+        sum += Math.min(1, s.page / s.totalPages)
+      } else {
+        anyUnknownInFlight = true
+      }
       inFlight.push(s)
     }
   }
-  const overall = sum / Math.max(1, progressState.totalAccounts)
-  bar.style.width = `${Math.min(100, overall * 100).toFixed(1)}%`
 
-  const head = inFlight
-    .slice(0, 2)
-    .map((s) => (s.totalPages ? `${s.name} · ${s.page}/${s.totalPages}` : `${s.name} · ${s.page}`))
-    .join(' · ')
+  // Determinate bar only when we have a real estimate. Otherwise let CSS animate the pulse.
+  if (anyUnknownInFlight) {
+    progressEl.classList.remove('determinate')
+    bar.style.width = ''
+  } else {
+    progressEl.classList.add('determinate')
+    const overall = sum / Math.max(1, progressState.totalAccounts)
+    bar.style.width = `${Math.min(100, overall * 100).toFixed(1)}%`
+  }
+
+  const head = inFlight.slice(0, 2).map(formatInFlight).join(' · ')
   const more = inFlight.length > 2 ? ` +${inFlight.length - 2}` : ''
-  const tail = `(${doneCount}/${progressState.totalAccounts} contas)`
+  const tail = `(${doneCount}/${progressState.totalAccounts} ${progressState.totalAccounts === 1 ? 'conta' : 'contas'})`
   setStatus(head ? `${head}${more} ${tail}` : `Processando ${tail}`, null)
+}
+
+function formatInFlight(s: PerAccountProgress): string {
+  // When the API gives a real total, show "page X/Y"; otherwise show the cumulative page count
+  // for this account (across extracts, windows and iterate items) so the user sees movement.
+  const progress = s.totalPages && s.totalPages > 0 ? `pág ${s.page}/${s.totalPages}` : `${s.pagesFetched} págs`
+  return s.txCollected > 0 ? `${s.name} · ${progress} · ${s.txCollected} tx` : `${s.name} · ${progress}`
 }
 
 async function refreshRecipes(): Promise<void> {

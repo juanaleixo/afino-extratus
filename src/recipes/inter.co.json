@@ -1,7 +1,7 @@
 {
   "$schema": "afino-extratus-recipe/v1",
   "site": "inter.co",
-  "version": 4,
+  "version": 6,
   "label": "Banco Inter",
   "matchHosts": ["contadigital.inter.co", "cd.web.bancointer.com.br"],
   "bank": { "id": "00416968", "org": "Banco Inter", "branchId": "0001" },
@@ -134,8 +134,10 @@
           "headers": {
             "Authorization": "{capturedHeader:authorization}",
             "cpfcnpj": "{capturedHeader:cpfcnpj}",
+            "theme": "PF",
             "x-inter-conta-corrente": "{capturedHeader:x-inter-conta-corrente}",
-            "x-inter-organization": "{capturedHeader:x-inter-organization}"
+            "x-inter-organization": "{capturedHeader:x-inter-organization}",
+            "x-inter-tema": "PF"
           }
         },
         "list": "[*]",
