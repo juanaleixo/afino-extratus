@@ -2,122 +2,97 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <title>Extratus</title>
-    <style>
-      :root {
-        color-scheme: light dark;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      }
-      body {
-        margin: 0;
-        padding: 16px;
-        width: 320px;
-        background: Canvas;
-        color: CanvasText;
-      }
-      h1 {
-        font-size: 16px;
-        font-weight: 600;
-        margin: 0 0 14px;
-      }
-      label {
-        display: block;
-        margin-bottom: 10px;
-        font-size: 12px;
-        font-weight: 500;
-      }
-      label span {
-        display: block;
-        margin-bottom: 4px;
-        opacity: 0.7;
-      }
-      select {
-        width: 100%;
-        padding: 8px 10px;
-        border: 1px solid rgba(127, 127, 127, 0.4);
-        border-radius: 6px;
-        background: Canvas;
-        color: inherit;
-        font-size: 13px;
-      }
-      button {
-        width: 100%;
-        padding: 10px;
-        border: 1px solid currentColor;
-        background: transparent;
-        color: inherit;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        margin-top: 6px;
-      }
-      button:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .status {
-        margin-top: 12px;
-        padding: 8px 10px;
-        border-radius: 6px;
-        background: rgba(127, 127, 127, 0.1);
-        font-size: 12px;
-        line-height: 1.4;
-        min-height: 18px;
-      }
-      .status:empty {
-        display: none;
-      }
-      .status.ok {
-        background: rgba(34, 197, 94, 0.12);
-      }
-      .status.error {
-        background: rgba(239, 68, 68, 0.12);
-      }
-      .status .action {
-        display: inline-block;
-        margin-top: 6px;
-        font-size: 12px;
-        text-decoration: underline;
-        cursor: pointer;
-        color: inherit;
-      }
-      .help-link {
-        display: block;
-        margin-top: 14px;
-        font-size: 12px;
-        text-align: center;
-        color: inherit;
-        opacity: 0.7;
-        text-decoration: none;
-      }
-      .help-link:hover {
-        opacity: 1;
-        text-decoration: underline;
-      }
-    </style>
+    <title>Afino Extratus</title>
+    <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
-    <h1>Extratus</h1>
-    <label>
-      <span>Banco</span>
-      <select id="recipe-select"><option>Carregando…</option></select>
-    </label>
-    <label>
-      <span>Período</span>
-      <select id="period-select">
-        <option value="all" selected>Tudo (~1 ano)</option>
-        <option value="month">Último mês</option>
-        <option value="last_two_weeks">Últimos 15 dias</option>
-        <option value="last_week">Últimos 7 dias</option>
-        <option value="yesterday">Ontem</option>
-        <option value="today">Hoje</option>
-      </select>
-    </label>
-    <button id="export-ofx">Exportar OFX</button>
-    <button id="export-csv">Exportar CSV</button>
-    <div id="status" class="status"></div>
-    <a id="help-link" class="help-link" href="#" target="_blank">Não tem seu banco? Contribua uma recipe →</a>
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <div class="brand-text">
+          <span class="brand-name">Afino</span>
+          <span class="brand-product">Extratus</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+      <section id="current-card" class="card current-card hidden" aria-live="polite">
+        <div class="current-card-body">
+          <span class="current-eyebrow">Detectado nesta aba</span>
+          <strong id="current-label" class="current-label">—</strong>
+          <span id="current-source" class="badge badge-muted">Built-in</span>
+        </div>
+        <button id="current-export" class="btn btn-primary">Exportar</button>
+      </section>
+
+      <section class="card">
+        <label class="field">
+          <span class="field-label">Banco</span>
+          <select id="recipe-select" class="select">
+            <option>Carregando…</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Período</span>
+          <select id="period-select" class="select">
+            <option value="all" selected>Tudo</option>
+            <option value="month">Último mês</option>
+            <option value="last_two_weeks">Últimos 15 dias</option>
+            <option value="last_week">Últimos 7 dias</option>
+            <option value="yesterday">Ontem</option>
+            <option value="today">Hoje</option>
+          </select>
+        </label>
+
+        <div class="field">
+          <div class="accounts-header">
+            <span class="field-label">Contas</span>
+            <button id="accounts-refresh" type="button" class="btn-link">Carregar</button>
+          </div>
+          <div id="accounts-list" class="accounts-list">
+            <span class="hint">Clique "Carregar" para listar as contas que essa recipe descobre.</span>
+          </div>
+        </div>
+
+        <label class="field">
+          <span class="field-label">Formato</span>
+          <select id="format-select" class="select">
+            <option value="ofx" selected>OFX</option>
+            <option value="csv">CSV</option>
+            <option value="both">OFX + CSV</option>
+          </select>
+        </label>
+
+        <button id="export-ofx" class="btn btn-primary btn-block">Exportar</button>
+      </section>
+
+      <div id="progress" class="progress" hidden aria-hidden="true"><span></span></div>
+      <div id="status" class="status" role="status"></div>
+
+      <details class="card details">
+        <summary>Importar recipe customizada (JSON)</summary>
+        <p class="hint">
+          Cole abaixo o JSON gerado pelo agente. Ele será validado e ficará disponível só pra você.
+        </p>
+        <textarea
+          id="import-textarea"
+          class="textarea"
+          rows="6"
+          placeholder='{"$schema":"afino-extratus-recipe/v1", ...}'
+        ></textarea>
+        <div class="row">
+          <button id="import-btn" class="btn btn-secondary">Importar</button>
+          <button id="delete-btn" class="btn btn-ghost" hidden>Remover esta</button>
+        </div>
+      </details>
+
+      <a id="help-link" class="help-link" href="#" target="_blank">
+        Não tem seu banco? Gere uma recipe com IA →
+      </a>
+    </main>
+
     <script type="module" src="./popup.ts"></script>
   </body>
 </html>

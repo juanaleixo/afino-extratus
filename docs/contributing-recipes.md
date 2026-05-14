@@ -1,6 +1,6 @@
 # Contribuindo uma recipe com ajuda de um agente
 
-A maneira mais rápida de adicionar suporte a um banco/fintech que ainda não está no Extratus é delegar a descoberta para um agente com browser tools (Claude in Chrome, Computer Use, Claude Code com MCP `claude-in-chrome`).
+A maneira mais rápida de adicionar suporte a um banco/fintech que ainda não está no Afino Extratus é delegar a descoberta para um agente com browser tools (Claude in Chrome, Computer Use, Claude Code com MCP `claude-in-chrome`).
 
 ## Pré-requisitos
 
@@ -12,107 +12,62 @@ A maneira mais rápida de adicionar suporte a um banco/fintech que ainda não es
 
 A maioria dos bancos brasileiros usa um destes padrões para renderizar o extrato:
 
-| Padrão | Como reconhecer |
-|---|---|
-| **Next.js SSR** | `<script id="__NEXT_DATA__">` no HTML inicial |
-| **Nordic SSR** (Mercado Livre/Pago) | `<script id="__NORDIC_RENDERING_CTX__">` no HTML inicial |
-| **Redux/Vuex hydration** | `window.__INITIAL_STATE__` / `window.__PRELOADED_STATE__` |
-| **SPA puro com API** | Página vazia, lista populada via XHR/fetch JSON |
+| Padrão | Como reconhecer | `source.type` |
+|---|---|---|
+| **Next.js SSR** | `<script id="__NEXT_DATA__">` no HTML inicial | `ssr-next` |
+| **Nordic SSR** (Mercado Livre/Pago) | `<script id="__NORDIC_RENDERING_CTX__">` | `ssr-nordic` |
+| **SPA + REST JSON** | Página vazia, lista populada via XHR/fetch JSON | `rest-json` |
 
-Os três primeiros expõem o JSON completo da lista no HTML inicial — basta um `fetch` na sessão logada e parsing. O quarto exige interceptar a request XHR. Um agente experiente identifica o padrão em poucos minutos.
+Os SSR expõem o JSON completo no HTML inicial — basta um `fetch` na sessão logada e parsing. O REST puro é mais comum em apps mobile-first; o agente identifica o pattern via DevTools.
 
 ## O prompt
 
-Está no popup da extensão (botão "Não tem seu banco?" → página de ajuda) — também copiável daqui:
+Está no popup da extensão (link "Não tem seu banco? Gere uma recipe com IA"). O agente devolve **JSON declarativo** no schema `afino-extratus-recipe/v1` — sem TypeScript, sem código a executar.
 
-```
-Você vai descobrir como o site do meu banco renderiza o extrato, e produzir uma recipe TypeScript para o projeto Extratus. Eu já estou logado na conta. NÃO clique em botões que mudem estado (transferir, pagar, confirmar) — você é READ-ONLY.
+## O ciclo curto (testar local sem PR)
 
-OBJETIVO
-Mapear como obter, de forma programática, a lista completa de transações do extrato — incluindo paginação e filtros de data — e devolver um arquivo TypeScript no formato Recipe do Extratus.
+1. O agente devolve o JSON.
+2. No popup, abra **"Importar recipe customizada (JSON)"**, cole e clique **Importar**.
+3. Volte na aba do banco logado e clique **Exportar OFX**.
+4. Itere com o agente se algo estiver fora (descrição quebrada, sinais invertidos, paginação parando cedo).
 
-PASSO A PASSO
+A recipe colada fica em `chrome.storage.local`, só pra você. O engine restringe os `fetch` aos hosts em `matchHosts` antes de chamar — uma recipe não consegue tocar host fora desse allowlist.
 
-1. Abra a página principal de extrato do banco e me diga a URL. Tire screenshot.
+## O ciclo longo (contribuir built-in)
 
-2. Antes de qualquer clique, inspecione o HTML inicial procurando dados embarcados (SSR):
-   - `<script id="__NEXT_DATA__">` (Next.js)
-   - `<script id="__NORDIC_RENDERING_CTX__">` (Mercado Libre)
-   - `window.__INITIAL_STATE__`, `window.__PRELOADED_STATE__`, `window.__APP_DATA__`
-   - Qualquer `<script>` cujo textContent contenha uma transação visível.
-   Reporte: qual padrão SSR e o JSONPath até o array de transações.
-
-3. Capture as requisições de rede (XHR/fetch) que populam a lista. Aplique um filtro de data ("últimos 30 dias") e role a página. Reporte:
-   - URL exata, method, headers críticos (CSRF, X-Requested-With), cookies necessários.
-   - Body POST quando houver.
-
-4. Pegue UMA transação de exemplo e mostre o JSON cru completo do item. Identifique:
-   - `id` ESTÁVEL (FITID, dedup); NUNCA use índice.
-   - data ISO ou DD/MM/YYYY.
-   - valor: centavos separados? sinal incluso? separador de milhares?
-   - sinal: campo canônico (`type:"in"|"out"`) ou inferido?
-   - moeda explícita ou implícita BRL?
-   - descrição combinada de quais campos? Categoria do usuário?
-
-5. Paginação. Itere até a última página. Como funciona? `?page=N` 1- ou 0-indexed? cursor? scroll infinito? Confirme total reportado vs iterado.
-
-6. Lançamentos especiais com tag distinta:
-   - Rendimento automático (cofrinho, savings)
-   - Pix entrada/saída
-   - Cartão parcelado
-   - Cashback / estorno
-   Marque a regra (ex: "metadata.kind=investment ⇒ Rendimento").
-
-7. Multi-conta. O site tem corrente + cofrinhos + cartão? Liste cada uma com URL e endpoint.
-
-ENTREGÁVEIS
-
-A. Relatório markdown com os 7 itens preenchidos.
-
-B. Arquivo TypeScript pronto para `src/recipes/<dominio>.ts`:
-
-```ts
-import type { Recipe } from './_schema'
-import type { RecipeOutput } from '@/types/transaction'
-import { fetchNordicCtx } from '@/engine/nordic-ssr'  // só se SSR Nordic
-import { sleep } from '@/engine/recipe-helpers'
-import Decimal from 'decimal.js'
-
-export const bancoX: Recipe = {
-  site: 'bancox.com.br',
-  version: 1,
-  label: 'Banco X',
-  match: (url) => /(^|\.)bancox\.com\.br$/.test(url.hostname),
-  extract: async ({ window }) => {
-    // 1. fetch páginas (loop sobre `page` até o total reportado)
-    // 2. dedup por id se houver overlap
-    // 3. map para NormalizedTransaction
-    // 4. retornar 1+ RecipeOutput (um por conta)
-    return []
-  },
-}
-```
-
-REGRAS NÃO NEGOCIÁVEIS
-- `amount` é Decimal. NUNCA parseFloat.
-- `postedAt` é `Date` UTC. DD/MM/YYYY → parse em America/Sao_Paulo.
-- `fitId` estável: duas exportações do mesmo período → mesmos fitIds.
-- `extract` idempotente.
-- `await sleep(250)` entre requests.
-
-Comece pelo passo 1 e vá em sequência.
-```
-
-## Depois que o agente terminar
-
-1. Salve o `.ts` em `src/recipes/<dominio>.ts`.
-2. Registre em [src/recipes/_registry.ts](../src/recipes/_registry.ts).
-3. Adicione o domínio em `host_permissions` e num `content_scripts.matches` no [src/manifest.json](../src/manifest.json).
+1. Quando a recipe estiver estável (rodou várias vezes sem regressão), salve em `src/recipes/<dominio>.json`.
+2. Registre nada — o `_registry.ts` já carrega automaticamente quando você adicionar o `import` (Vite resolve `import recipe from './x.json'`).
+3. Adicione o domínio em `host_permissions` no `src/manifest.json` se ainda não estiver coberto.
 4. `npm test && npm run build`.
-5. Carregue `dist/` no Chrome em modo dev, vá na página do banco, clique o ícone Extratus → Exportar OFX.
-6. Importe o OFX no seu software (Afino, GnuCash, YNAB) e confira: contagem, soma, saldo, datas em 31/12 ↔ 01/01.
-7. Abra um PR com o relatório markdown na descrição.
+5. Carregue `dist/` no Chrome em modo dev e teste como built-in.
+6. Importe o OFX no Afino, GnuCash ou YNAB — confira contagem, soma, saldo e bordas (31/12 ↔ 01/01).
+7. Abra um PR. Cole o relatório markdown do agente na descrição.
 
 ## Recipes existentes como referência
 
-- [Mercado Pago](../src/recipes/mercadopago.com.br.ts) — exemplo de SSR Nordic, multi-account (conta + cofrinhos), rendimento como linha distinta. Usa [nordic-ssr](../src/engine/nordic-ssr.ts) e [bitacora-mapper](../src/engine/bitacora-mapper.ts).
+- [Mercado Pago](../src/recipes/mercadopago.com.br.json) — exemplo de SSR Nordic, multi-account com discovery (conta + cofrinhos), prefixos condicionais ("Rendimento ·", "Cofrinho ·", "Pix ·") e amount no formato bitácora (`fractionPath` + `centsPath`).
+
+## Mapa de campos rápido
+
+| Caso | JSON |
+|---|---|
+| ID estável | `"id": { "path": "id" }` |
+| ID composto | `"id": { "paths": ["accountId", "txId"], "join": "-" }` |
+| Data ISO | `"postedAt": { "path": "date", "format": "iso" }` |
+| Data DD/MM/YYYY | `"postedAt": { "path": "date", "format": "br-date" }` |
+| Data unix | `"postedAt": { "path": "ts", "format": "unix-s" }` |
+| Valor inteiro em centavos | `"amount": { "path": "cents", "scale": 0.01 }` |
+| Valor "1.234,56" | `"amount": { "path": "valor", "format": "br" }` |
+| Valor bitácora (Nordic) | `"amount": { "fractionPath": "amount.fraction", "centsPath": "amount.cents" }` |
+| Crédito quando `type == "in"` | `"type": { "creditWhen": { "path": "type", "equals": "in" } }` |
+| Crédito por sinal do amount | `"type": { "creditWhenSign": ">=0" }` |
+| Descrição com conector opcional | `"description": { "template": "{title}[ — {description}]" }` |
+| Descrição com prefixo condicional | `"description": { "template": "{title}", "prefixes": [{ "when": { "path": "kind", "equals": "pix" }, "value": "Pix · " }] }` |
+
+## Paginação rápida
+
+| Caso | JSON |
+|---|---|
+| Sem paginação | omitir `pagination` |
+| Total de páginas no response | `"pagination": { "type": "page-count", "totalPath": "totalPages", "max": 100 }` |
+| Cursor next | `"pagination": { "type": "cursor", "nextPath": "next", "max": 100 }` |

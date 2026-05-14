@@ -10,3 +10,9 @@ coverage/
 .vscode/
 tmp/
 .claude/
+
+# Personal bank statements (never commit)
+*.ofx
+*.csv
+!tests/**/*.csv
+!docs/**/*.csv

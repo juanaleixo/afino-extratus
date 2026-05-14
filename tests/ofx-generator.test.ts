@@ -150,4 +150,67 @@ describe('buildOfx', () => {
   it('throws on empty input (would emit a useless OFX)', () => {
     expect(() => buildOfx([])).toThrow(/no results/)
   })
+
+  it('emits FI block in SONRS when result.fi is present', () => {
+    const ofx = buildOfx(makeResult({ fi: { org: 'Mercado Pago', fid: '24013030' } }))
+    expect(ofx).toContain('<FI>')
+    expect(ofx).toContain('<ORG>Mercado Pago')
+    expect(ofx).toContain('<FID>24013030')
+  })
+
+  it('uses account.bankId as <BANKID> and falls back to id when absent', () => {
+    const withIspb = buildOfx(
+      makeResult({
+        account: {
+          id: 'mp-checking',
+          bankId: '24013030',
+          branchId: '0001',
+          name: 'A',
+          type: 'checking',
+          currency: 'BRL',
+        },
+      }),
+    )
+    expect(withIspb).toContain('<BANKID>24013030')
+    expect(withIspb).toContain('<BRANCHID>0001')
+    expect(withIspb).toContain('<ACCTID>mp-checking')
+
+    const withoutIspb = buildOfx(makeResult())
+    expect(withoutIspb).toContain('<BANKID>12345-6')
+  })
+
+  it('emits LEDGERBAL when result.balance is present', () => {
+    const ofx = buildOfx(
+      makeResult({
+        balance: {
+          amount: new Decimal('110.00'),
+          asOf: new Date('2026-05-02T13:00:00Z'),
+          source: 'derived-from-transactions',
+        },
+      }),
+    )
+    expect(ofx).toContain('<LEDGERBAL>')
+    expect(ofx).toContain('<BALAMT>110.00')
+    expect(ofx).toContain('<DTASOF>')
+  })
+
+  it('emits both <NAME> (short) and <MEMO> (full) per transaction', () => {
+    const longDesc = 'Pix Pagamento muito longo para um pagador qualquer com mais de 32 caracteres'
+    const ofx = buildOfx(
+      makeResult({
+        transactions: [
+          {
+            fitId: 'x',
+            postedAt: new Date('2026-05-01T00:00:00Z'),
+            amount: new Decimal('1.00'),
+            currency: 'BRL',
+            description: longDesc,
+            type: 'credit',
+          },
+        ],
+      }),
+    )
+    expect(ofx).toMatch(/<NAME>[^\n]{1,32}/)
+    expect(ofx).toContain(`<MEMO>${longDesc}`)
+  })
 })

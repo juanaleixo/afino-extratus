@@ -1,16 +1,45 @@
 {
   "manifest_version": 3,
-  "name": "Extratus",
+  "name": "Afino Extratus",
   "version": "0.0.1",
-  "description": "Exporta extratos OFX/CSV de bancos e fintechs brasileiros direto do navegador",
-  "permissions": ["downloads", "tabs"],
-  "host_permissions": ["https://*.mercadopago.com.br/*"],
+  "description": "Exporta extratos OFX de bancos e fintechs brasileiros direto do navegador, no padrão Afino.",
+  "permissions": ["downloads", "tabs", "storage", "scripting", "webRequest"],
+  "host_permissions": [
+    "https://*.mercadopago.com.br/*",
+    "https://*.rico.com.vc/*",
+    "https://*.inter.co/*",
+    "https://*.bancointer.com.br/*"
+  ],
+  "optional_host_permissions": ["https://*/*"],
   "background": {
     "service_worker": "src/background/service-worker.ts",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.mercadopago.com.br/*",
+        "https://*.rico.com.vc/*",
+        "https://*.inter.co/*",
+        "https://*.bancointer.com.br/*"
+      ],
+      "js": ["src/capture/capture-fetch.ts"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.mercadopago.com.br/*",
+        "https://*.rico.com.vc/*",
+        "https://*.inter.co/*",
+        "https://*.bancointer.com.br/*"
+      ],
+      "js": ["src/capture/capture-bridge.ts"],
+      "run_at": "document_start"
+    }
+  ],
   "action": {
     "default_popup": "src/popup/popup.html",
-    "default_title": "Extratus"
+    "default_title": "Afino Extratus"
   }
 }

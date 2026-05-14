@@ -1,0 +1,201 @@
+{
+  "$schema": "afino-extratus-recipe/v1",
+  "site": "inter.co",
+  "version": 4,
+  "label": "Banco Inter",
+  "matchHosts": ["contadigital.inter.co", "cd.web.bancointer.com.br"],
+  "bank": { "id": "00416968", "org": "Banco Inter", "branchId": "0001" },
+  "accounts": [
+    {
+      "kind": "single",
+      "id": "inter-checking",
+      "name": "Banco Inter — Conta",
+      "type": "checking",
+      "currency": "BRL",
+      "extracts": [
+        {
+          "source": {
+            "type": "rest-json",
+            "url": "https://cd.web.bancointer.com.br/ib-pfj/cc/extrato/bff/v2/home",
+            "headers": {
+              "Authorization": "{capturedHeader:authorization}",
+              "x-inter-app-version": "{capturedHeader:x-inter-app-version}",
+              "x-inter-conta-corrente": "{capturedHeader:x-inter-conta-corrente}",
+              "x-inter-organization": "{capturedHeader:x-inter-organization}",
+              "x-inter-origin": "{capturedHeader:x-inter-origin}"
+            }
+          },
+          "pagination": { "type": "none" },
+          "list": "transactions.data[*].bankStatements[*].transactions[*]",
+          "inheritFromParent": ["day"],
+          "fields": {
+            "id": { "path": "detail.metadata.id" },
+            "postedAt": {
+              "paths": [
+                "detail.data.transactionDate",
+                "detail.data.aboutTransaction.purchaseDate",
+                "detail.data.aboutTransaction.transactionDate",
+                "detail.data.aboutTransaction.returnDate",
+                "day"
+              ],
+              "format": "br-date"
+            },
+            "amount": { "path": "detail.data.value", "format": "br" },
+            "type": { "creditWhen": { "path": "detail.metadata.operationType", "equals": "C" } },
+            "description": { "template": "{detail.title}[ — {detail.description}]" }
+          }
+        },
+        {
+          "source": {
+            "type": "rest-json",
+            "url": "https://cd.web.bancointer.com.br/ib-pfj/cc/extrato/bff/v2/transactions?page={page}&startDate={windowStart}&endDate={windowEnd}",
+            "headers": {
+              "Authorization": "{capturedHeader:authorization}",
+              "x-inter-app-version": "{capturedHeader:x-inter-app-version}",
+              "x-inter-conta-corrente": "{capturedHeader:x-inter-conta-corrente}",
+              "x-inter-organization": "{capturedHeader:x-inter-organization}",
+              "x-inter-origin": "{capturedHeader:x-inter-origin}"
+            }
+          },
+          "windowedHistory": {
+            "windowDays": 730,
+            "maxYears": 50,
+            "format": "iso-date",
+            "startVar": "windowStart",
+            "endVar": "windowEnd"
+          },
+          "runOnlyForPresets": ["all"],
+          "pagination": {
+            "type": "page-count",
+            "startPage": 0,
+            "max": 60,
+            "stopWhen": { "path": "metadata.noContent", "equals": "true" }
+          },
+          "list": "data[*].bankStatements[*].transactions[*]",
+          "inheritFromParent": ["day"],
+          "fields": {
+            "id": { "path": "detail.metadata.id" },
+            "postedAt": {
+              "paths": [
+                "detail.data.transactionDate",
+                "detail.data.aboutTransaction.purchaseDate",
+                "detail.data.aboutTransaction.transactionDate",
+                "detail.data.aboutTransaction.returnDate",
+                "day"
+              ],
+              "format": "br-date"
+            },
+            "amount": { "path": "detail.data.value", "format": "br" },
+            "type": { "creditWhen": { "path": "detail.metadata.operationType", "equals": "C" } },
+            "description": { "template": "{detail.title}[ — {detail.description}]" }
+          },
+          "delayMs": 250
+        }
+      ]
+    },
+    {
+      "kind": "single",
+      "id": "inter-pending",
+      "name": "Banco Inter — Lançamentos futuros",
+      "type": "pending",
+      "currency": "BRL",
+      "extract": {
+        "source": {
+          "type": "rest-json",
+          "url": "https://cd.web.bancointer.com.br/ib-pfj/cc/extrato/bff/v2/home",
+          "headers": {
+            "Authorization": "{capturedHeader:authorization}",
+            "x-inter-app-version": "{capturedHeader:x-inter-app-version}",
+            "x-inter-conta-corrente": "{capturedHeader:x-inter-conta-corrente}",
+            "x-inter-organization": "{capturedHeader:x-inter-organization}",
+            "x-inter-origin": "{capturedHeader:x-inter-origin}"
+          }
+        },
+        "pagination": { "type": "none" },
+        "list": "schedules.data[*].schedules[*]",
+        "fields": {
+          "id": { "path": "detail.metadata.id" },
+          "postedAt": { "path": "detail.date", "format": "iso" },
+          "amount": { "path": "detail.data.value", "format": "br" },
+          "type": { "creditWhen": { "path": "detail.metadata.operationType", "equals": "C" } },
+          "description": { "template": "{detail.title}[ — {detail.description}]" }
+        }
+      }
+    },
+    {
+      "kind": "discovered",
+      "idPrefix": "inter-credit-card",
+      "type": "credit_card",
+      "currency": "BRL",
+      "discover": {
+        "source": {
+          "type": "rest-json",
+          "url": "https://cd.web.bancointer.com.br/ib-pfj/meios-pagamentos/v1/cardholders",
+          "headers": {
+            "Authorization": "{capturedHeader:authorization}",
+            "cpfcnpj": "{capturedHeader:cpfcnpj}",
+            "x-inter-conta-corrente": "{capturedHeader:x-inter-conta-corrente}",
+            "x-inter-organization": "{capturedHeader:x-inter-organization}"
+          }
+        },
+        "list": "[*]",
+        "fields": {
+          "id": "cardAccount",
+          "name": "productDescription",
+          "product": "productCode"
+        }
+      },
+      "extract": {
+        "iterate": {
+          "source": {
+            "type": "rest-json",
+            "url": "https://cd.web.bancointer.com.br/ib-pfj/meios-pagamentos/v2/faturas/resumos",
+            "headers": {
+              "Authorization": "{capturedHeader:authorization}",
+              "cardaccount": "{discovered.id}",
+              "cpfcnpj": "{capturedHeader:cpfcnpj}",
+              "product": "{discovered.product}",
+              "theme": "PF",
+              "x-inter-conta-corrente": "{capturedHeader:x-inter-conta-corrente}",
+              "x-inter-organization": "{capturedHeader:x-inter-organization}",
+              "x-inter-tema": "PF"
+            }
+          },
+          "list": "[*]",
+          "filter": { "path": "typeInvoice", "notEquals": "futura" },
+          "fields": {
+            "cycle.billingCycle": "billingCycle",
+            "cycle.type": { "path": "typeInvoice", "mapValues": { "aberta": "OPEN", "fechada": "CLOSED" } }
+          },
+          "delayMs": 250
+        },
+        "source": {
+          "type": "rest-json",
+          "url": "https://cd.web.bancointer.com.br/ib-pfj/meios-pagamentos/v2/invoices/{cycle.type}/transactions",
+          "headers": {
+            "Authorization": "{capturedHeader:authorization}",
+            "cardaccount": "{discovered.id}",
+            "closingdate": "{cycle.billingCycle}",
+            "cpfcnpj": "{capturedHeader:cpfcnpj}",
+            "product": "{discovered.product}",
+            "theme": "PF",
+            "type": "{cycle.type}",
+            "x-inter-conta-corrente": "{capturedHeader:x-inter-conta-corrente}",
+            "x-inter-organization": "{capturedHeader:x-inter-organization}",
+            "x-inter-tema": "PF"
+          }
+        },
+        "pagination": { "type": "none" },
+        "list": "[*]",
+        "fields": {
+          "id": { "template": "inter-cc-{cycle.billingCycle}-{date}-{amount}-{currentInstallment}-{description}" },
+          "postedAt": { "path": "date", "format": "iso-date" },
+          "amount": { "path": "amount" },
+          "description": { "path": "description" },
+          "type": { "creditWhen": { "path": "type", "equals": "CREDIT" } }
+        }
+      },
+      "nameTemplate": "Banco Inter — Cartão {discovered.name}"
+    }
+  ]
+}

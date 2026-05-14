@@ -1,12 +1,13 @@
 {
-  "name": "extratus",
+  "name": "afino-extratus",
   "version": "0.0.1",
   "private": true,
-  "description": "Browser extension that exports OFX and CSV statements from Brazilian bank and fintech sites",
+  "description": "Browser extension that exports OFX and CSV statements from Brazilian bank and fintech sites in the Afino flow",
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite build --watch --mode development",
+    "dev:hmr": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:watch": "vitest",

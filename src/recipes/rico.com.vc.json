@@ -1,0 +1,48 @@
+{
+  "$schema": "afino-extratus-recipe/v1",
+  "site": "rico.com.vc",
+  "version": 1,
+  "label": "Rico",
+  "matchHosts": ["arealogada.rico.com.vc", "api.rico.com.vc"],
+  "bank": { "id": "33775974", "org": "Rico Investimentos", "branchId": "0001" },
+  "accounts": [
+    {
+      "kind": "single",
+      "id": "rico-checking",
+      "name": "Rico — Conta Investimento",
+      "type": "checking",
+      "currency": "BRL",
+      "extract": {
+        "source": {
+          "type": "rest-json",
+          "url": "https://api.rico.com.vc/finance/checking-account/v1/customers/statements?Page={page}&EntryType=All&PageSize={pageSize}&StartDate={periodStart}&EndDate={periodEnd}",
+          "method": "GET",
+          "headers": {
+            "Accept": "application/json",
+            "Authorization": "{sessionStorage:Authorization}"
+          }
+        },
+        "pagination": { "type": "page-until-empty", "pageSize": 20, "max": 500 },
+        "periodMap": {
+          "today": { "periodStart": "now", "periodEnd": "now" },
+          "yesterday": { "periodStart": "-1d", "periodEnd": "now" },
+          "last_week": { "periodStart": "-7d", "periodEnd": "now" },
+          "last_two_weeks": { "periodStart": "-14d", "periodEnd": "now" },
+          "month": { "periodStart": "-30d", "periodEnd": "now" },
+          "all": { "periodStart": "-365d", "periodEnd": "now" }
+        },
+        "dateFormat": { "periodStart": "iso-utc", "periodEnd": "iso-utc" },
+        "list": "events",
+        "fields": {
+          "id": { "path": "entryNumber" },
+          "postedAt": { "path": "transactionDate", "format": "iso" },
+          "amount": { "path": "value" },
+          "currency": { "const": "BRL" },
+          "description": { "path": "description" },
+          "type": { "creditWhenSign": "positive" }
+        },
+        "delayMs": 250
+      }
+    }
+  ]
+}

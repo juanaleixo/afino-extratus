@@ -1,0 +1,114 @@
+{
+  "$schema": "afino-extratus-recipe/v1",
+  "site": "mercadopago.com.br",
+  "version": 3,
+  "label": "Mercado Pago",
+  "matchHosts": ["www.mercadopago.com.br", "*.mercadopago.com.br"],
+  "bank": { "id": "24013030", "org": "Mercado Pago", "branchId": "0001" },
+  "accounts": [
+    {
+      "kind": "single",
+      "id": "mp-checking",
+      "name": "Mercado Pago — Conta",
+      "type": "checking",
+      "currency": "BRL",
+      "extract": {
+        "source": {
+          "type": "ssr-nordic",
+          "url": "https://www.mercadopago.com.br/banking/balance/movements?page={page}[&period={period}]"
+        },
+        "pagination": {
+          "type": "page-count",
+          "totalPath": "appProps.pageProps.initialState.list.result.pages",
+          "max": 100
+        },
+        "periodMap": {
+          "today": "today",
+          "yesterday": "yesterday",
+          "last_week": "last_week",
+          "last_two_weeks": "last_two_weeks",
+          "month": "month"
+        },
+        "list": "appProps.pageProps.initialState.list.result.binnacles[*].movements[*]",
+        "fields": {
+          "id": { "path": "id" },
+          "postedAt": { "path": "ledger_datetime", "format": "iso" },
+          "amount": { "fractionPath": "amount.fraction", "centsPath": "amount.cents" },
+          "currency": { "path": "amount.currency_id" },
+          "description": {
+            "template": "{title}[ — {description}]",
+            "prefixes": [
+              {
+                "when": { "path": "metadata.recipe", "equals": "fund-asset_management_gain" },
+                "value": "Rendimento · "
+              },
+              {
+                "when": { "path": "metadata.kind", "equals": "fund_reallocation" },
+                "value": "Cofrinho · "
+              },
+              { "when": { "path": "metadata.detail", "equals": "pix" }, "value": "Pix · " }
+            ]
+          },
+          "type": { "creditWhen": { "path": "metadata.type", "notEquals": "out" } }
+        },
+        "delayMs": 250
+      }
+    },
+    {
+      "kind": "discovered",
+      "idPrefix": "mp-pot",
+      "type": "savings",
+      "currency": "BRL",
+      "discover": {
+        "source": {
+          "type": "ssr-nordic",
+          "url": "https://www.mercadopago.com.br/savings/hub"
+        },
+        "list": "appProps.pageProps.hub.result.potsDataHub.result.pots",
+        "fields": { "id": "id", "name": "name" }
+      },
+      "extract": {
+        "source": {
+          "type": "ssr-nordic",
+          "url": "https://www.mercadopago.com.br/savings/movements/{discovered.id}?page={page}[&period={period}]"
+        },
+        "pagination": {
+          "type": "page-count",
+          "totalPath": "appProps.pageProps.initialState.list.result.pages",
+          "max": 100
+        },
+        "periodMap": {
+          "today": "today",
+          "yesterday": "yesterday",
+          "last_week": "last_week",
+          "last_two_weeks": "last_two_weeks",
+          "month": "month"
+        },
+        "list": "appProps.pageProps.initialState.list.result.binnacles[*].movements[*]",
+        "fields": {
+          "id": { "path": "id" },
+          "postedAt": { "path": "ledger_datetime", "format": "iso" },
+          "amount": { "fractionPath": "amount.fraction", "centsPath": "amount.cents" },
+          "currency": { "path": "amount.currency_id" },
+          "description": {
+            "template": "{title}[ — {description}]",
+            "prefixes": [
+              {
+                "when": { "path": "metadata.recipe", "equals": "fund-asset_management_gain" },
+                "value": "Rendimento · "
+              },
+              {
+                "when": { "path": "metadata.kind", "equals": "fund_reallocation" },
+                "value": "Cofrinho · "
+              },
+              { "when": { "path": "metadata.detail", "equals": "pix" }, "value": "Pix · " }
+            ]
+          },
+          "type": { "creditWhen": { "path": "metadata.type", "notEquals": "out" } }
+        },
+        "delayMs": 250
+      },
+      "nameTemplate": "Mercado Pago — Cofrinho {discovered.name}"
+    }
+  ]
+}
