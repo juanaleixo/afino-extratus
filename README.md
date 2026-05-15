@@ -73,11 +73,18 @@ Detalhes em [docs/recipe-format.md](docs/recipe-format.md). TL;DR:
 3. Adicione o domínio em `host_permissions` e em um bloco `content_scripts.matches` no [`src/manifest.json`](src/manifest.json)
 4. Teste exportando e importando o arquivo gerado
 
+## Importar arquivo OFX
+
+Tem um OFX que o próprio app/site do banco já mandou (Nubank PF, Itaú, BB, Caixa)? Solte no popup em **"Importar arquivo OFX"** — o Extratus parseia o SGML mesmo mal-formado, decodifica `windows-1252` corretamente, gera FITID estável quando o original veio sem, e devolve um OFX 1.0.2 padronizado que qualquer importador aceita. Sem precisar de recipe.
+
+Implementação em [src/parsers/ofx/](src/parsers/ofx/). Detalhes da spec em [docs/recipe-spec-v1.md §4.4](docs/recipe-spec-v1.md).
+
 ## Roadmap próximo
 
 - Mercado Pago — atividade + porquinho/rendimento (em descoberta)
-- Nubank — conta + cartão de crédito
-- Inter, C6, BTG Pactual
+- `Source: 'pdf-upload'` — fatura de cartão (Nubank, Itaú, Bradesco, Inter, C6, Porto) via porte do [banksheet](https://github.com/tio-ze-rj/banksheet)
+- Nubank PJ (Nu Empresas) — recipe REST/SSR; ver [docs/recipes/nubank-discovery.md](docs/recipes/nubank-discovery.md)
+- Inter, C6, BTG Pactual conta corrente
 - AI fallback opcional para descoberta automática de selectors quando recipe não existe (v2)
 
 ## Licença

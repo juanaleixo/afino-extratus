@@ -145,6 +145,16 @@ API JSON pura. Suporta `GET`/`POST`, headers e body com templates.
 - `{capturedHeader:NAME}` — header recente que a SPA do banco enviou (capturado pelo content script, vive em memória, típico Itaú/Inter).
 - `{sessionStorage:KEY}` / `{localStorage:KEY}` — lê do storage da aba ativa. Se a chave não existir, o motor lança `LoginRequiredError`.
 
+### 4.4 Importação de arquivo OFX (sem `Source`)
+
+Independente do sistema de recipes, o popup expõe **"Importar arquivo OFX"** que aceita qualquer `.ofx`/`.qfx`/`.qbo` (o que o app/site do banco já entrega) e re-normaliza com a mesma pipeline de saída — FITID estável, encoding correto, dedup, OFX 1.0.2 SGML padronizado. Útil quando:
+
+- O banco não tem web (Nubank PF desde set/2024).
+- O OFX nativo vem mal-formado (Itaú/BB/Caixa cospem SGML sem fechamento, charset `windows-1252`).
+- Você quer um único arquivo no padrão Extratus em vez de N flavors por banco.
+
+Implementação em [src/parsers/ofx/](../src/parsers/ofx/) — não precisa de recipe nem de `Source` no JSON; é uma feature do motor.
+
 ---
 
 ## 5. Pagination
@@ -411,7 +421,9 @@ Itens já mapeados como necessários para virar hub multi-fonte. Aceitarão prop
 
 | Item | Categoria | Origem |
 |---|---|---|
-| `Source: 'file-upload'` (PDF/CSV/XLSX/OFX) | Hub de import | banksheet, csv2ofx, ofx-js |
+| ~~OFX upload~~ | ✅ Implementado — ver §4.4 | ofx-js |
+| `Source: 'pdf-upload'` (faturas Nubank/Itaú/Bradesco/Inter/C6/Porto) | Hub de import | banksheet |
+| `Source: 'csv-upload'` / `xlsx-upload` | Hub de import | csv2ofx, Mercado Pago |
 | `Source: 'download-intercept'` (captura download nativo) | Hub de import | Itaú/Inter já entregam OFX/CSV via botão |
 | `FieldsSpec.payee` separado de `description` | Fidelidade OFX | csv2ofx |
 | `FieldsSpec.checkNum`, `balance`, `installment`, `fxOriginal` | Fidelidade OFX | csv2ofx, banksheet |
