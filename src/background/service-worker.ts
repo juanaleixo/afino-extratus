@@ -9,6 +9,8 @@ import {
   planAccounts,
   runRecipe,
 } from '@/engine/recipe-engine'
+import { normalizeOfx } from '@/parsers/ofx/normalizer'
+import { parseOfx } from '@/parsers/ofx/parser'
 import { findRecipeBySite, listAllRecipes } from '@/recipes/_registry'
 import type { PeriodFilter } from '@/recipes/_schema'
 import { deleteCustomRecipe, importCustomRecipe } from '@/storage/custom-recipes'
@@ -81,6 +83,13 @@ interface CapturedHeadersMessage {
   host: string
   headers: Record<string, string>
 }
+interface ImportOfxMessage {
+  type: 'import-ofx-file'
+  /** Decoded text content of the OFX file. The popup is responsible for picking the right charset. */
+  content: string
+  filename: string
+  format?: ExportFormat
+}
 
 type IncomingMessage =
   | ListRecipesMessage
@@ -89,6 +98,7 @@ type IncomingMessage =
   | ImportRecipeMessage
   | DeleteRecipeMessage
   | CapturedHeadersMessage
+  | ImportOfxMessage
 
 chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendResponse) => {
   console.log('[afino] message received', message.type)
@@ -136,6 +146,13 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
   if (message.type === 'captured-headers') {
     void storeCapturedHeaders(message.host, message.headers)
     return false
+  }
+
+  if (message.type === 'import-ofx-file') {
+    handleImportOfxFile(message)
+      .then((summary) => sendResponse({ ok: true, summary }))
+      .catch((err: Error) => sendResponse({ ok: false, error: err.message }))
+    return true
   }
 
   return false
@@ -354,6 +371,72 @@ function instrumentedFetch(inner: typeof fetch): typeof fetch {
       throw err
     }
   }) as typeof fetch
+}
+
+async function handleImportOfxFile(req: ImportOfxMessage): Promise<{
+  accounts: number
+  transactions: number
+  files: number
+}> {
+  const doc = parseOfx(req.content)
+  const results = normalizeOfx(doc, { filename: req.filename, source: 'ofx-upload', sourceVersion: 1 })
+
+  const format: ExportFormat = req.format ?? 'ofx'
+  const wantsOfx = format === 'ofx' || format === 'both'
+  const wantsCsv = format === 'csv' || format === 'both'
+
+  const baseName = stripExt(req.filename) || 'extratus-ofx'
+  let filesWritten = 0
+  for (const result of results) {
+    if (wantsOfx) {
+      const ofx = buildOfx([result])
+      await downloadDataUrl(
+        ofx,
+        'application/x-ofx',
+        buildImportFilename(baseName, result.account.id, result.account.name, 'ofx'),
+      )
+      filesWritten += 1
+    }
+    if (wantsCsv) {
+      const csv = buildCsv([result])
+      await downloadDataUrl(
+        csv,
+        'text/csv',
+        buildImportFilename(baseName, result.account.id, result.account.name, 'csv'),
+      )
+      filesWritten += 1
+    }
+  }
+
+  return {
+    accounts: results.length,
+    transactions: results.reduce((s, r) => s + r.transactions.length, 0),
+    files: filesWritten,
+  }
+}
+
+function stripExt(filename: string): string {
+  return filename.replace(/\.(ofx|qfx|qbo)$/i, '')
+}
+
+function buildImportFilename(baseName: string, accountId: string, accountName: string, ext: 'ofx' | 'csv'): string {
+  const safeBase =
+    baseName
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase()
+      .slice(0, 40) || 'extratus'
+  const safeAccount = accountName
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+    .slice(0, 30)
+  const tag = safeAccount || accountId.replace(/[^a-z0-9]/gi, '-')
+  return `extratus-${safeBase}-${tag}.${ext}`
 }
 
 function buildFilename(site: string, accountId: string, accountName: string, ext: 'ofx' | 'csv'): string {

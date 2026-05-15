@@ -8,7 +8,8 @@
     "https://*.mercadopago.com.br/*",
     "https://*.rico.com.vc/*",
     "https://*.inter.co/*",
-    "https://*.bancointer.com.br/*"
+    "https://*.bancointer.com.br/*",
+    "https://*.nubank.com.br/*"
   ],
   "optional_host_permissions": ["https://*/*"],
   "background": {
@@ -21,7 +22,8 @@
         "https://*.mercadopago.com.br/*",
         "https://*.rico.com.vc/*",
         "https://*.inter.co/*",
-        "https://*.bancointer.com.br/*"
+        "https://*.bancointer.com.br/*",
+        "https://*.nubank.com.br/*"
       ],
       "js": ["src/capture/capture-fetch.ts"],
       "run_at": "document_start",
@@ -32,7 +34,8 @@
         "https://*.mercadopago.com.br/*",
         "https://*.rico.com.vc/*",
         "https://*.inter.co/*",
-        "https://*.bancointer.com.br/*"
+        "https://*.bancointer.com.br/*",
+        "https://*.nubank.com.br/*"
       ],
       "js": ["src/capture/capture-bridge.ts"],
       "run_at": "document_start"

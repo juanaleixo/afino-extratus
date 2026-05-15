@@ -72,6 +72,24 @@
       <div id="status" class="status" role="status"></div>
 
       <details class="card details">
+        <summary>Importar arquivo OFX</summary>
+        <p class="hint">
+          Tem um OFX que o app/site do banco mandou (ex.: Nubank PF, Itaú, BB)? Solte aqui que o
+          Extratus re-normaliza com FITID estável e gera OFX padronizado pra qualquer importador.
+        </p>
+        <label class="field">
+          <span class="field-label">Formato de saída</span>
+          <select id="ofx-import-format" class="select">
+            <option value="ofx" selected>OFX</option>
+            <option value="csv">CSV</option>
+            <option value="both">OFX + CSV</option>
+          </select>
+        </label>
+        <input id="ofx-import-file" type="file" accept=".ofx,.qfx,.qbo" class="file-input" />
+        <p id="ofx-import-status" class="hint" aria-live="polite"></p>
+      </details>
+
+      <details class="card details">
         <summary>Importar recipe customizada (JSON)</summary>
         <p class="hint">
           Cole abaixo o JSON gerado pelo agente. Ele será validado e ficará disponível só pra você.

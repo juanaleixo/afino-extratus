@@ -25,6 +25,9 @@ const currentExportBtn = $<HTMLButtonElement>('current-export')
 const importTextarea = $<HTMLTextAreaElement>('import-textarea')
 const importBtn = $<HTMLButtonElement>('import-btn')
 const deleteBtn = $<HTMLButtonElement>('delete-btn')
+const ofxImportFile = $<HTMLInputElement>('ofx-import-file')
+const ofxImportFormat = $<HTMLSelectElement>('ofx-import-format')
+const ofxImportStatus = $<HTMLParagraphElement>('ofx-import-status')
 const progressEl = $<HTMLDivElement>('progress')
 const accountsRefreshBtn = $<HTMLButtonElement>('accounts-refresh')
 const accountsListEl = $<HTMLDivElement>('accounts-list')
@@ -50,6 +53,10 @@ async function init(): Promise<void> {
   currentExportBtn.addEventListener('click', () => exportNow(detectedSite ?? recipeSelect.value))
   importBtn.addEventListener('click', importRecipe)
   deleteBtn.addEventListener('click', deleteRecipe)
+  ofxImportFile.addEventListener('change', () => {
+    const file = ofxImportFile.files?.[0]
+    if (file) void importOfxFile(file)
+  })
   recipeSelect.addEventListener('change', () => {
     updateDeleteButton()
     renderAccountsList(recipeSelect.value)
@@ -290,6 +297,63 @@ async function importRecipe(): Promise<void> {
   } finally {
     setBusy(false)
   }
+}
+
+async function importOfxFile(file: File): Promise<void> {
+  setOfxImportStatus(`Lendo "${file.name}"…`, null)
+  ofxImportFile.disabled = true
+  try {
+    // Decoding charset matters: BR banks ship windows-1252; reading as UTF-8 silently mojibakes
+    // accents. Peek at the header (which is ASCII) to choose the decoder.
+    const buffer = new Uint8Array(await file.arrayBuffer())
+    const probe = new TextDecoder('latin1').decode(buffer.slice(0, 1024))
+    const charset = pickCharset(probe)
+    const content = new TextDecoder(charset).decode(buffer)
+
+    const resp = await chrome.runtime.sendMessage({
+      type: 'import-ofx-file',
+      content,
+      filename: file.name,
+      format: ofxImportFormat.value as 'ofx' | 'csv' | 'both',
+    })
+    if (!resp?.ok) {
+      setOfxImportStatus(`Erro: ${resp?.error ?? 'falha ao importar OFX'}`, 'error')
+      return
+    }
+    const { accounts, transactions, files } = resp.summary as {
+      accounts: number
+      transactions: number
+      files: number
+    }
+    setOfxImportStatus(
+      `${transactions} transações em ${accounts} ${accounts === 1 ? 'conta' : 'contas'} · ${files} ${files === 1 ? 'arquivo baixado' : 'arquivos baixados'}`,
+      'ok',
+    )
+  } catch (err) {
+    setOfxImportStatus(`Erro: ${(err as Error).message}`, 'error')
+  } finally {
+    ofxImportFile.disabled = false
+    // Reset so picking the same file twice in a row still triggers `change`.
+    ofxImportFile.value = ''
+  }
+}
+
+function pickCharset(headerProbe: string): string {
+  const m = headerProbe.match(/CHARSET:\s*(\S+)/i)
+  if (m) {
+    const v = m[1]?.trim().toLowerCase()
+    if (v === '1252') return 'windows-1252'
+    if (v === '8859-1' || v === 'iso-8859-1') return 'iso-8859-1'
+    if (v === 'utf-8' || v === 'utf8') return 'utf-8'
+  }
+  const m2 = headerProbe.match(/encoding\s*=\s*["']([^"']+)["']/i)
+  if (m2?.[1]) return m2[1].toLowerCase()
+  return 'utf-8'
+}
+
+function setOfxImportStatus(text: string, kind: 'ok' | 'error' | null): void {
+  ofxImportStatus.textContent = text
+  ofxImportStatus.style.color = kind === 'ok' ? 'var(--success)' : kind === 'error' ? 'var(--error)' : ''
 }
 
 async function deleteRecipe(): Promise<void> {
