@@ -1,4 +1,5 @@
 import { buildCsv } from '@/engine/csv-generator'
+import { deserializeResult } from '@/engine/normalize'
 import { buildOfx } from '@/engine/ofx-generator'
 import {
   type AccountSummary,
@@ -14,6 +15,7 @@ import { parseOfx } from '@/parsers/ofx/parser'
 import { findRecipeBySite, listAllRecipes } from '@/recipes/_registry'
 import type { PeriodFilter } from '@/recipes/_schema'
 import { deleteCustomRecipe, importCustomRecipe } from '@/storage/custom-recipes'
+import type { SerializedExtractionResult } from '@/types/transaction'
 
 console.log('[afino] SW loaded')
 
@@ -90,6 +92,16 @@ interface ImportOfxMessage {
   filename: string
   format?: ExportFormat
 }
+/**
+ * PDF flow: pdfjs only runs in the popup (DOM context). The popup ships an already-normalized
+ * `SerializedExtractionResult` and the worker just generates OFX/CSV — same as the recipe path,
+ * minus the recipe.
+ */
+interface ImportPdfParsedMessage {
+  type: 'import-pdf-parsed'
+  result: SerializedExtractionResult
+  format?: ExportFormat
+}
 
 type IncomingMessage =
   | ListRecipesMessage
@@ -99,6 +111,7 @@ type IncomingMessage =
   | DeleteRecipeMessage
   | CapturedHeadersMessage
   | ImportOfxMessage
+  | ImportPdfParsedMessage
 
 chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendResponse) => {
   console.log('[afino] message received', message.type)
@@ -150,6 +163,13 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
 
   if (message.type === 'import-ofx-file') {
     handleImportOfxFile(message)
+      .then((summary) => sendResponse({ ok: true, summary }))
+      .catch((err: Error) => sendResponse({ ok: false, error: err.message }))
+    return true
+  }
+
+  if (message.type === 'import-pdf-parsed') {
+    handleImportPdfParsed(message)
       .then((summary) => sendResponse({ ok: true, summary }))
       .catch((err: Error) => sendResponse({ ok: false, error: err.message }))
     return true
@@ -416,7 +436,41 @@ async function handleImportOfxFile(req: ImportOfxMessage): Promise<{
 }
 
 function stripExt(filename: string): string {
-  return filename.replace(/\.(ofx|qfx|qbo)$/i, '')
+  return filename.replace(/\.(ofx|qfx|qbo|pdf)$/i, '')
+}
+
+async function handleImportPdfParsed(req: ImportPdfParsedMessage): Promise<{
+  accounts: number
+  transactions: number
+  files: number
+}> {
+  const result = deserializeResult(req.result)
+  const format: ExportFormat = req.format ?? 'ofx'
+  const wantsOfx = format === 'ofx' || format === 'both'
+  const wantsCsv = format === 'csv' || format === 'both'
+
+  const baseName = stripExt(result.account.name) || 'extratus-pdf'
+  let filesWritten = 0
+  if (wantsOfx) {
+    const ofx = buildOfx([result])
+    await downloadDataUrl(
+      ofx,
+      'application/x-ofx',
+      buildImportFilename(baseName, result.account.id, result.account.name, 'ofx'),
+    )
+    filesWritten += 1
+  }
+  if (wantsCsv) {
+    const csv = buildCsv([result])
+    await downloadDataUrl(csv, 'text/csv', buildImportFilename(baseName, result.account.id, result.account.name, 'csv'))
+    filesWritten += 1
+  }
+
+  return {
+    accounts: 1,
+    transactions: result.transactions.length,
+    files: filesWritten,
+  }
 }
 
 function buildImportFilename(baseName: string, accountId: string, accountName: string, ext: 'ofx' | 'csv'): string {

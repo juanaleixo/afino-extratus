@@ -72,10 +72,10 @@
       <div id="status" class="status" role="status"></div>
 
       <details class="card details">
-        <summary>Importar arquivo OFX</summary>
+        <summary>Importar arquivo (OFX ou fatura PDF)</summary>
         <p class="hint">
-          Tem um OFX que o app/site do banco mandou (ex.: Nubank PF, Itaú, BB)? Solte aqui que o
-          Extratus re-normaliza com FITID estável e gera OFX padronizado pra qualquer importador.
+          OFX que o banco mandou (Nubank PF, Itaú, BB) re-normaliza com FITID estável. Fatura PDF
+          de cartão (Nubank) vira OFX padronizado. Saída pronta pra qualquer importador.
         </p>
         <label class="field">
           <span class="field-label">Formato de saída</span>
@@ -85,7 +85,7 @@
             <option value="both">OFX + CSV</option>
           </select>
         </label>
-        <input id="ofx-import-file" type="file" accept=".ofx,.qfx,.qbo" class="file-input" />
+        <input id="ofx-import-file" type="file" accept=".ofx,.qfx,.qbo,.pdf" class="file-input" />
         <p id="ofx-import-status" class="hint" aria-live="polite"></p>
       </details>
 

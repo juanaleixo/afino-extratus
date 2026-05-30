@@ -1,4 +1,8 @@
+import { serializeResult } from '@/engine/normalize'
 import type { AccountSummary, ProgressEvent } from '@/engine/recipe-engine'
+import { extractText } from '@/parsers/pdf/extractor'
+import { normalizePdf } from '@/parsers/pdf/normalizer'
+import { PdfPluginNotDetectedError, detectAndParse } from '@/parsers/pdf/registry'
 import type { PeriodPreset } from '@/recipes/_schema'
 import helpUrl from './help.html?url'
 
@@ -55,7 +59,7 @@ async function init(): Promise<void> {
   deleteBtn.addEventListener('click', deleteRecipe)
   ofxImportFile.addEventListener('change', () => {
     const file = ofxImportFile.files?.[0]
-    if (file) void importOfxFile(file)
+    if (file) void importFile(file)
   })
   recipeSelect.addEventListener('change', () => {
     updateDeleteButton()
@@ -299,36 +303,16 @@ async function importRecipe(): Promise<void> {
   }
 }
 
-async function importOfxFile(file: File): Promise<void> {
+async function importFile(file: File): Promise<void> {
   setOfxImportStatus(`Lendo "${file.name}"…`, null)
   ofxImportFile.disabled = true
   try {
-    // Decoding charset matters: BR banks ship windows-1252; reading as UTF-8 silently mojibakes
-    // accents. Peek at the header (which is ASCII) to choose the decoder.
-    const buffer = new Uint8Array(await file.arrayBuffer())
-    const probe = new TextDecoder('latin1').decode(buffer.slice(0, 1024))
-    const charset = pickCharset(probe)
-    const content = new TextDecoder(charset).decode(buffer)
-
-    const resp = await chrome.runtime.sendMessage({
-      type: 'import-ofx-file',
-      content,
-      filename: file.name,
-      format: ofxImportFormat.value as 'ofx' | 'csv' | 'both',
-    })
-    if (!resp?.ok) {
-      setOfxImportStatus(`Erro: ${resp?.error ?? 'falha ao importar OFX'}`, 'error')
-      return
+    const isPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf'
+    if (isPdf) {
+      await importPdfFile(file)
+    } else {
+      await importOfxFile(file)
     }
-    const { accounts, transactions, files } = resp.summary as {
-      accounts: number
-      transactions: number
-      files: number
-    }
-    setOfxImportStatus(
-      `${transactions} transações em ${accounts} ${accounts === 1 ? 'conta' : 'contas'} · ${files} ${files === 1 ? 'arquivo baixado' : 'arquivos baixados'}`,
-      'ok',
-    )
   } catch (err) {
     setOfxImportStatus(`Erro: ${(err as Error).message}`, 'error')
   } finally {
@@ -336,6 +320,70 @@ async function importOfxFile(file: File): Promise<void> {
     // Reset so picking the same file twice in a row still triggers `change`.
     ofxImportFile.value = ''
   }
+}
+
+async function importOfxFile(file: File): Promise<void> {
+  // Decoding charset matters: BR banks ship windows-1252; reading as UTF-8 silently mojibakes
+  // accents. Peek at the header (which is ASCII) to choose the decoder.
+  const buffer = new Uint8Array(await file.arrayBuffer())
+  const probe = new TextDecoder('latin1').decode(buffer.slice(0, 1024))
+  const charset = pickCharset(probe)
+  const content = new TextDecoder(charset).decode(buffer)
+
+  const resp = await chrome.runtime.sendMessage({
+    type: 'import-ofx-file',
+    content,
+    filename: file.name,
+    format: ofxImportFormat.value as 'ofx' | 'csv' | 'both',
+  })
+  if (!resp?.ok) {
+    setOfxImportStatus(`Erro: ${resp?.error ?? 'falha ao importar OFX'}`, 'error')
+    return
+  }
+  reportImportSummary(resp.summary)
+}
+
+/**
+ * PDF flow: pdfjs only runs in the DOM (popup) context — extractText + plugin detection +
+ * normalization all happen here. The service worker receives a fully normalized
+ * SerializedExtractionResult and just generates OFX/CSV files.
+ */
+async function importPdfFile(file: File): Promise<void> {
+  setOfxImportStatus(`Lendo PDF "${file.name}"…`, null)
+  const buffer = await file.arrayBuffer()
+  const text = await extractText(buffer)
+
+  let outcome: ReturnType<typeof detectAndParse>
+  try {
+    outcome = detectAndParse(text)
+  } catch (err) {
+    if (err instanceof PdfPluginNotDetectedError) {
+      setOfxImportStatus(err.message, 'error')
+      return
+    }
+    throw err
+  }
+  setOfxImportStatus(`Detectei: ${outcome.plugin.label} — gerando arquivo…`, null)
+
+  const result = normalizePdf(outcome, { filename: file.name })
+  const resp = await chrome.runtime.sendMessage({
+    type: 'import-pdf-parsed',
+    result: serializeResult(result),
+    format: ofxImportFormat.value as 'ofx' | 'csv' | 'both',
+  })
+  if (!resp?.ok) {
+    setOfxImportStatus(`Erro: ${resp?.error ?? 'falha ao gerar arquivo'}`, 'error')
+    return
+  }
+  reportImportSummary(resp.summary)
+}
+
+function reportImportSummary(summary: unknown): void {
+  const s = summary as { accounts: number; transactions: number; files: number }
+  setOfxImportStatus(
+    `${s.transactions} transações em ${s.accounts} ${s.accounts === 1 ? 'conta' : 'contas'} · ${s.files} ${s.files === 1 ? 'arquivo baixado' : 'arquivos baixados'}`,
+    'ok',
+  )
 }
 
 function pickCharset(headerProbe: string): string {
